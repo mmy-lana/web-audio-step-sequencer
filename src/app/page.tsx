@@ -216,14 +216,14 @@ export default function HomePage(): ReactElement {
               onClick={() => hydrateFromStorage()}
               variant="primary"
               size="sm"
-              className="min-h-[32px]!"
+              className="min-h-[44px]! md:min-h-[32px]!"
             />
             <PushButton
               label="Dismiss"
               onClick={() => setRemoteChangeAvailable(false)}
               variant="ghost"
               size="sm"
-              className="min-h-[32px]!"
+              className="min-h-[44px]! md:min-h-[32px]!"
             />
           </div>
         </div>
@@ -259,42 +259,71 @@ export default function HomePage(): ReactElement {
     setIsEditMode(!isEditMode);
   }, [setIsEditMode, isEditMode]);
 
-  const consoleTransport = (
-    <TransportControls
-      variant="console"
-      isPlaying={isPlaying}
-      bpm={bpm}
-      swing={swing}
-      masterVolume={masterFx.masterVolume}
-      onTogglePlay={handleToggleTransport}
-      onStop={stop}
-      onChangeBpm={setBpm}
-      onChangeSwing={setSwing}
-      onChangeMasterVolume={handleChangeMasterVolume}
-      onTapTempo={handleTapTempo}
-      stepCount={stepCount}
-      onChangeStepCount={setStepCount}
-      stepPage={stepPage}
-      onChangeStepPage={setStepPage}
-      isEditMode={isEditMode}
-      onToggleEditMode={handleToggleEditMode}
-      isPowered={isInitialized}
-      tapCount={tapCount}
-    />
+  // Render functions rather than shared element constants: each call site gets
+  // its own element, so the console deck mounted in the top bar and in the
+  // mobile FX tab are two independent instances rather than one reused element
+  // descriptor sitting at two positions in the tree.
+  const renderConsoleTransport = useCallback(
+    (): ReactElement => (
+      <TransportControls
+        variant="console"
+        isPlaying={isPlaying}
+        bpm={bpm}
+        swing={swing}
+        masterVolume={masterFx.masterVolume}
+        onTogglePlay={handleToggleTransport}
+        onStop={stop}
+        onChangeBpm={setBpm}
+        onChangeSwing={setSwing}
+        onChangeMasterVolume={handleChangeMasterVolume}
+        onTapTempo={handleTapTempo}
+        stepCount={stepCount}
+        onChangeStepCount={setStepCount}
+        stepPage={stepPage}
+        onChangeStepPage={setStepPage}
+        isEditMode={isEditMode}
+        onToggleEditMode={handleToggleEditMode}
+        isPowered={Boolean(isInitialized)}
+        tapCount={tapCount}
+      />
+    ),
+    [
+      isPlaying,
+      bpm,
+      swing,
+      masterFx.masterVolume,
+      handleToggleTransport,
+      stop,
+      setBpm,
+      setSwing,
+      handleChangeMasterVolume,
+      handleTapTempo,
+      stepCount,
+      setStepCount,
+      stepPage,
+      setStepPage,
+      isEditMode,
+      handleToggleEditMode,
+      isInitialized,
+      tapCount,
+    ],
   );
 
-  const barTransport = (
-    <TransportControls
-      variant="bar"
-      isPlaying={isPlaying}
-      bpm={bpm}
-      onTogglePlay={handleToggleTransport}
-      onStop={stop}
-      onChangeBpm={setBpm}
-      onTapTempo={handleTapTempo}
-      isPowered={isInitialized}
-      tapCount={tapCount}
-    />
+  const renderBarTransport = useCallback(
+    (): ReactElement => (
+      <TransportControls
+        variant="bar"
+        isPlaying={isPlaying}
+        bpm={bpm}
+        onTogglePlay={handleToggleTransport}
+        onStop={stop}
+        onChangeBpm={setBpm}
+        onTapTempo={handleTapTempo}
+        isPowered={Boolean(isInitialized)}
+        tapCount={tapCount}
+      />
+    ),
+    [isPlaying, bpm, handleToggleTransport, stop, setBpm, handleTapTempo, isInitialized, tapCount],
   );
 
   const patternManager = (
@@ -335,7 +364,7 @@ export default function HomePage(): ReactElement {
       <HardwareChassis
         header={header}
         statusRail={statusRail}
-        consoleBar={<div className="hidden md:block">{consoleTransport}</div>}
+        consoleBar={<div className="hidden md:block">{renderConsoleTransport()}</div>}
         mobileNav={
           <MobileNavPanel
             activeTab={activeMobileTab}
@@ -344,7 +373,7 @@ export default function HomePage(): ReactElement {
             onToggleEditMode={handleToggleEditMode}
           />
         }
-        bottomBar={barTransport}
+        bottomBar={renderBarTransport()}
       >
         {/* --------------------------------------------------- mobile views */}
         <div className="flex flex-col gap-3 md:hidden">
@@ -377,7 +406,7 @@ export default function HomePage(): ReactElement {
             hidden={activeMobileTab !== 'fx'}
             className="flex flex-col gap-3"
           >
-            {consoleTransport}
+            {renderConsoleTransport()}
             {masterSection}
             {patternManager}
           </div>

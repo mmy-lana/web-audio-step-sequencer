@@ -1,5 +1,7 @@
 # dependencies
 /node_modules
+# pnpm may create a project-local store; it is a cache, never source
+/.pnpm-store
 /.pnp
 .pnp.js
 

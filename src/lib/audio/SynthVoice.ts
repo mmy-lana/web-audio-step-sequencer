@@ -9,6 +9,20 @@ const RELEASE_TAIL_SECONDS = 0.05;
 const MIN_GAIN = 0.001;
 
 /**
+ * Every node owned by one sounding voice.
+ *
+ * Tracking the intermediates matters: disconnecting a stopped oscillator leaves
+ * the filter and gain chain still attached to the destination, which keeps the
+ * whole chain alive in the audio graph. `stopAll()` and the `onended` handler
+ * both detach the complete chain.
+ */
+interface SynthActiveVoice {
+  osc: OscillatorNode;
+  filter: BiquadFilterNode;
+  gain: GainNode;
+}
+
+/**
  * Subtractive lead voice: oscillator -> resonant filter -> ADSR gain.
  *
  * The envelope guarantees that the gate never truncates the decay phase, so a
@@ -16,32 +30,47 @@ const MIN_GAIN = 0.001;
  */
 export class SynthVoice {
   private readonly ctx: AudioContext;
-  private readonly activeSources = new Set<AudioScheduledSourceNode>();
+  private readonly activeVoices = new Set<SynthActiveVoice>();
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
   }
 
+  /** Detaches every node of a voice. Safe to call more than once. */
+  private detachVoice(voice: SynthActiveVoice): void {
+    try {
+      voice.osc.disconnect();
+    } catch {
+      // Already detached.
+    }
+    try {
+      voice.filter.disconnect();
+    } catch {
+      // Already detached.
+    }
+    try {
+      voice.gain.disconnect();
+    } catch {
+      // Already detached.
+    }
+  }
+
   /** Stops and detaches every voice currently sounding. */
   public stopAll(): void {
-    this.activeSources.forEach((source) => {
+    this.activeVoices.forEach((voice) => {
       try {
-        source.stop();
+        voice.osc.stop();
       } catch {
         // The source already ended.
       }
-      try {
-        source.disconnect();
-      } catch {
-        // Already detached.
-      }
+      this.detachVoice(voice);
     });
-    this.activeSources.clear();
+    this.activeVoices.clear();
   }
 
-  /** Number of live oscillators, for the verification gate. */
+  /** Number of live voices, for the verification gate. */
   public getActiveSourceCount(): number {
-    return this.activeSources.size;
+    return this.activeVoices.size;
   }
 
   public trigger(
@@ -86,19 +115,19 @@ export class SynthVoice {
     gain.connect(dest);
 
     osc.start(time);
-    this.activeSources.add(osc);
+    const voice: SynthActiveVoice = { osc, filter, gain };
+    this.activeVoices.add(voice);
+
     osc.onended = () => {
-      this.activeSources.delete(osc);
-      try {
-        osc.disconnect();
-      } catch {
-        // Already detached.
-      }
+      this.activeVoices.delete(voice);
+      this.detachVoice(voice);
     };
     try {
       osc.stop(releaseEnd + RELEASE_TAIL_SECONDS);
     } catch {
-      this.activeSources.delete(osc);
+      // A source that already reached its stop time throws; drop the voice.
+      this.activeVoices.delete(voice);
+      this.detachVoice(voice);
     }
   }
 }

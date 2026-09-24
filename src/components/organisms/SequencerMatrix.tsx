@@ -121,7 +121,7 @@ export function SequencerMatrix({ variant, className = '' }: SequencerMatrixProp
               color="cyan"
               variant="secondary"
               size="sm"
-              className="min-h-[36px]! px-2.5! text-[9px]!"
+              className="min-h-[44px]! px-2.5! text-[9px]! md:min-h-[36px]!"
             />
           ))
         ) : (

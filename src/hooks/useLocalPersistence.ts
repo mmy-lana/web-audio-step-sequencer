@@ -32,11 +32,26 @@ export function useLocalPersistence(): UseLocalPersistenceResult {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const write = (): void => {
-      const state = useSequencerStore.getState();
-      if (!state.hasHydrated) return;
-      const result = saveWorkingCopy(state.pattern);
-      if (!result.ok) {
-        state.reportStorageError(result.error ?? 'Working copy could not be saved');
+      // Runs on the `pagehide` path too, where an escaping exception would
+      // abort the unload handler and lose the final edit.
+      try {
+        const state = useSequencerStore.getState();
+        if (!state.hasHydrated) return;
+        const result = saveWorkingCopy(state.pattern);
+        if (!result.ok) {
+          state.reportStorageError(result.error ?? 'Working copy could not be saved');
+        }
+        // A quota failure leaves the write in the memory mirror; surface that
+        // immediately instead of waiting for the next explicit slot action.
+        if (result.isQuotaExceeded === true || result.isMemoryFallback === true) {
+          state.syncStorageDiagnostics();
+        }
+      } catch (error) {
+        useSequencerStore
+          .getState()
+          .reportStorageError(
+            error instanceof Error ? error.message : 'Storage write failed unexpectedly',
+          );
       }
     };
 

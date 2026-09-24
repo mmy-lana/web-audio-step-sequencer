@@ -117,7 +117,7 @@ export function KnobRotary({
   const readout = formatValue(value, max, unit, displayValue);
 
   return (
-    <div className={`inline-flex select-none flex-col items-center gap-1 ${className}`}>
+    <div className={`inline-flex shrink-0 select-none flex-col items-center gap-1 ${className}`}>
       <span className={`engraved-label font-hardware ${LABEL_CLASSES[size]}`}>{label}</span>
 
       <div
@@ -131,7 +131,7 @@ export function KnobRotary({
         tabIndex={disabled ? -1 : 0}
         {...handlers}
         onDoubleClick={handleDoubleClick}
-        className={`relative flex touch-none items-center justify-center rounded-full outline-offset-4 ${
+        className={`relative flex min-h-[44px] min-w-[44px] shrink-0 touch-none items-center justify-center rounded-full outline-offset-4 ${
           disabled ? 'cursor-not-allowed opacity-50' : 'cursor-ns-resize'
         }`}
         style={{ width: BOX_PX[size], height: BOX_PX[size], touchAction: 'none' }}

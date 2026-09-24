@@ -8,7 +8,7 @@ import { LedVuMeter } from '@/components/ui/LedVuMeter';
 export interface StereoVuMeterProps {
   /** Polls the master analysers only while the audio graph exists. */
   isInitialized: boolean;
-  /** Sampling period in milliseconds. */
+  /** Minimum sampling period in milliseconds; frames are otherwise skipped. */
   intervalMs?: number;
   segments?: number;
   label?: string;
@@ -21,8 +21,11 @@ const DEFAULT_INTERVAL_MS = 60;
 /**
  * Self-polling stereo VU meter.
  *
- * Isolated in its own component so the ~16 fps analyser reads re-render only
- * these two ladders instead of the whole instrument shell.
+ * Driven by `requestAnimationFrame` rather than `setInterval`: the browser
+ * suspends animation frames in a hidden tab, so the meter costs nothing in the
+ * background, and frames are additionally throttled to `intervalMs` and dropped
+ * when both channels are unchanged. Isolated in its own component so analyser
+ * reads re-render only these two ladders, never the instrument shell.
  */
 export function StereoVuMeter({
   isInitialized,
@@ -38,14 +41,27 @@ export function StereoVuMeter({
       setLevels({ left: 0, right: 0 });
       return;
     }
+
     const engine = getAudioEngine();
-    const timer = setInterval(() => {
-      const next = engine.getStereoLevels();
-      setLevels((previous) =>
-        previous.left === next.left && previous.right === next.right ? previous : next,
-      );
-    }, intervalMs);
-    return () => clearInterval(timer);
+    const sampleIntervalMs = Math.max(16, intervalMs);
+    let frameId = 0;
+    let lastSampleAt = 0;
+
+    const tick = (timestamp: number): void => {
+      const isVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
+      if (isVisible && timestamp - lastSampleAt >= sampleIntervalMs) {
+        lastSampleAt = timestamp;
+        const next = engine.getStereoLevels();
+        // Dirty check: skip the render when the ladder would not change.
+        setLevels((previous) =>
+          previous.left === next.left && previous.right === next.right ? previous : next,
+        );
+      }
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
   }, [isInitialized, intervalMs]);
 
   return (

@@ -184,6 +184,59 @@ equal('selected track clamps into range', state().selectedTrackIndex, TRACK_COUN
 state().setSelectedTrackIndex(-5);
 equal('selected track clamps at zero', state().selectedTrackIndex, 0);
 
+section('Master FX deep immutability');
+resetStore();
+state().hydrateFromStorage();
+
+const fxBefore = state().pattern.masterFx;
+const filterBefore = fxBefore.filter;
+const delayBefore = fxBefore.delay;
+const distortionBefore = fxBefore.distortion;
+
+state().updateMasterFx({ delay: { feedback: 0.5 } });
+const fxAfter = state().pattern.masterFx;
+
+check('a patch produces a new masterFx object', fxAfter !== fxBefore);
+check('the nested filter object is rebuilt, not shared', fxAfter.filter !== filterBefore);
+check('the nested delay object is rebuilt, not shared', fxAfter.delay !== delayBefore);
+check(
+  'untouched nested objects are still rebuilt',
+  fxAfter.distortion !== distortionBefore,
+);
+equal('the patched field is applied', fxAfter.delay.feedback, 0.5);
+equal('sibling delay fields survive the patch', fxAfter.delay.time, delayBefore.time);
+equal('sibling filter fields survive the patch', fxAfter.filter.cutoff, filterBefore.cutoff);
+equal('the filter type survives a delay-only patch', fxAfter.filter.type, filterBefore.type);
+
+// Mutating the previous snapshot must not reach the new state.
+filterBefore.cutoff = 1;
+delayBefore.feedback = 0.9;
+equal('the new state is not aliased to the old filter object', state().pattern.masterFx.filter.cutoff, 18000);
+equal('the new state is not aliased to the old delay object', state().pattern.masterFx.delay.feedback, 0.5);
+
+// An explicitly undefined patch value must not blank a stored setting.
+state().updateMasterFx({ filter: { type: undefined } });
+equal(
+  'an explicit undefined cannot blank a stored setting',
+  state().pattern.masterFx.filter.type,
+  'lowpass',
+);
+state().updateMasterFx({ distortion: { drive: undefined } });
+equal(
+  'an explicit undefined cannot blank a numeric setting',
+  state().pattern.masterFx.distortion.drive,
+  12,
+);
+state().updateMasterFx({ filter: { type: 'bandpass' }, delay: { time: 0.4 }, distortion: { drive: 40 } });
+equal('a multi-section patch applies every section', state().pattern.masterFx.filter.type, 'bandpass');
+equal('a multi-section patch applies the delay', state().pattern.masterFx.delay.time, 0.4);
+equal('a multi-section patch applies the drive', state().pattern.masterFx.distortion.drive, 40);
+equal(
+  'unpatched sections keep their values',
+  state().pattern.masterFx.delay.feedback,
+  0.5,
+);
+
 /* ------------------------------------------------------- 3. step programming */
 
 section('Step programming');

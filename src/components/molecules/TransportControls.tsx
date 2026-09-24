@@ -60,7 +60,9 @@ export function TransportControls({
   onChangeStepPage,
   isEditMode = false,
   onToggleEditMode,
-  isPowered = true,
+  // Defaults to unpowered so a missing prop can never disagree with the server
+  // render, which always reports a suspended audio context.
+  isPowered = false,
   tapCount = 0,
   className = '',
 }: TransportControlsProps): ReactElement {
@@ -106,7 +108,7 @@ export function TransportControls({
           onClick={() => onChangeBpm(bpm + BPM_NUDGE_STEP)}
           variant="secondary"
           size="sm"
-          className="min-h-[22px]! px-2!"
+          className="min-h-[44px]! px-2! md:min-h-[22px]!"
         />
         <PushButton
           label="−"
@@ -114,7 +116,7 @@ export function TransportControls({
           onClick={() => onChangeBpm(bpm - BPM_NUDGE_STEP)}
           variant="secondary"
           size="sm"
-          className="min-h-[22px]! px-2!"
+          className="min-h-[44px]! px-2! md:min-h-[22px]!"
         />
       </div>
       <KnobRotary
@@ -227,7 +229,7 @@ export function TransportControls({
                   color="electric_blue"
                   variant="secondary"
                   size="sm"
-                  className="min-h-[36px]! px-2.5!"
+                  className="min-h-[44px]! px-2.5! md:min-h-[36px]!"
                 />
               ))}
             </div>
@@ -248,7 +250,7 @@ export function TransportControls({
                   color="cyan"
                   variant="secondary"
                   size="sm"
-                  className="min-h-[36px]! px-2.5!"
+                  className="min-h-[44px]! px-2.5! md:min-h-[36px]!"
                 />
               ))}
             </div>
@@ -266,7 +268,7 @@ export function TransportControls({
               color="violet"
               variant="secondary"
               size="sm"
-              className="min-h-[36px]!"
+              className="min-h-[44px]! md:min-h-[36px]!"
             />
           </div>
         ) : null}

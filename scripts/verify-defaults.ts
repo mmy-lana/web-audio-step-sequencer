@@ -9,9 +9,11 @@
  */
 import {
   MAX_IMPORT_SIZE_BYTES,
+  MAX_JSON_DEPTH,
   PatternSchema,
   SynthParamsSchema,
   formatValidationIssues,
+  measureJsonDepth,
   measureUtf8ByteLength,
   validatePatternJson,
 } from '../src/lib/validation/pattern';
@@ -291,6 +293,95 @@ throws('oversized payload throws', () =>
   validatePatternJson(JSON.stringify({ ...base, name: 'x'.repeat(MAX_IMPORT_SIZE_BYTES + 10) })),
 );
 check('utf8 byte measurement is exact', measureUtf8ByteLength('a\u00e9\u20ac') === 6, String(measureUtf8ByteLength('a\u00e9\u20ac')));
+
+/* ------------------------------------------------------- 1b. hostile payloads */
+
+section('Prototype-pollution hardening');
+const validJson = JSON.stringify(base);
+const hostileJson = `{"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}},${validJson.slice(1)}`;
+
+const naiveParse = JSON.parse(hostileJson) as Record<string, unknown>;
+check(
+  'unrevived JSON.parse keeps an own __proto__ key',
+  Object.prototype.hasOwnProperty.call(naiveParse, '__proto__'),
+);
+
+const hardened = validatePatternJson(hostileJson);
+check(
+  'the reviver strips the own __proto__ key',
+  !Object.prototype.hasOwnProperty.call(hardened, '__proto__'),
+);
+check(
+  'the reviver strips the own constructor key',
+  !Object.prototype.hasOwnProperty.call(hardened, 'constructor'),
+);
+check(
+  'Object.prototype is not polluted by __proto__',
+  ({} as Record<string, unknown>)['polluted'] === undefined,
+);
+check(
+  'Object.prototype is not polluted by constructor.prototype',
+  ({} as Record<string, unknown>)['polluted'] === undefined,
+);
+equal('a hardened payload still validates', hardened.bpm, base.bpm);
+equal('the hardened payload keeps every track', hardened.tracks.length, 8);
+check(
+  'the hardened payload keeps nested step data',
+  hardened.tracks[0].steps.length === base.stepCount,
+);
+
+const pollutedImport = importPatternFromJson(hostileJson);
+check('a hostile payload can still be imported safely', pollutedImport.ok);
+check(
+  'the imported pattern carries no prototype keys',
+  pollutedImport.data !== undefined &&
+    !Object.prototype.hasOwnProperty.call(pollutedImport.data, '__proto__'),
+);
+check(
+  'importing a hostile payload does not pollute Object.prototype',
+  ({} as Record<string, unknown>)['polluted'] === undefined,
+);
+
+section('Nesting depth limits');
+equal('a flat object measures one level', measureJsonDepth({ a: 1 }), 1);
+equal('nested arrays and objects are counted', measureJsonDepth({ a: [{ b: 1 }] }), 3);
+equal('a primitive measures zero levels', measureJsonDepth(7), 0);
+equal('null measures zero levels', measureJsonDepth(null), 0);
+check(
+  'a real pattern stays well inside the limit',
+  measureJsonDepth(JSON.parse(validJson)) < MAX_JSON_DEPTH,
+  String(measureJsonDepth(JSON.parse(validJson))),
+);
+
+const deepPayload = `${'{"a":'.repeat(MAX_JSON_DEPTH + 8)}1${'}'.repeat(MAX_JSON_DEPTH + 8)}`;
+throws('an over-deep payload is rejected', () => validatePatternJson(deepPayload));
+check(
+  'the depth rejection is reported clearly',
+  (() => {
+    try {
+      validatePatternJson(deepPayload);
+      return false;
+    } catch (error) {
+      return error instanceof Error && error.message.includes('nested deeper');
+    }
+  })(),
+);
+check(
+  'an over-deep payload is rejected by the import path too',
+  !importPatternFromJson(deepPayload).ok,
+);
+check(
+  'a payload exactly at the limit is still parsed',
+  (() => {
+    try {
+      validatePatternJson(`${'{"a":'.repeat(MAX_JSON_DEPTH)}1${'}'.repeat(MAX_JSON_DEPTH)}`);
+      return false;
+    } catch (error) {
+      // Schema rejection is expected; the depth guard must not be what fired.
+      return error instanceof Error && !error.message.includes('nested deeper');
+    }
+  })(),
+);
 
 /* --------------------------------------------------------- 2. grid factories */
 

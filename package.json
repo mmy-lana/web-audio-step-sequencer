@@ -12,7 +12,8 @@
     "verify:store": "tsx scripts/verify-store.ts",
     "verify:render": "tsx scripts/verify-render.tsx",
     "verify:engine": "tsx scripts/verify-engine.ts",
-    "verify": "pnpm run typecheck && pnpm run verify:defaults && pnpm run verify:store && pnpm run verify:render && pnpm run verify:engine",
+    "verify:hydration": "tsx scripts/verify-hydration.tsx",
+    "verify": "pnpm run typecheck && pnpm run verify:defaults && pnpm run verify:store && pnpm run verify:render && pnpm run verify:engine && pnpm run verify:hydration",
     "gate": "pnpm run verify && pnpm run build"
   },
   "dependencies": {
@@ -24,9 +25,11 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "latest",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "jsdom": "^30.1.1",
     "postcss": "latest",
     "tailwindcss": "latest",
     "tsx": "latest",

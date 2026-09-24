@@ -60,6 +60,8 @@ export class AudioEngine {
   private getPatternSnapshot: (() => Pattern) | null = null;
   private readonly listeners = new Set<() => void>();
   private isPlaying = false;
+  /** In-flight initialisation, so concurrent callers share one graph build. */
+  private initPromise: Promise<void> | null = null;
 
   /** Stable reference for `useSyncExternalStore`. */
   public readonly subscribe = (listener: () => void): (() => void) => {
@@ -81,38 +83,58 @@ export class AudioEngine {
 
   /**
    * Constructs the audio graph synchronously and resumes the context.
-   * Safe to call repeatedly: after the first call it only retries `resume()`.
+   *
+   * Serialised by an in-flight mutex: two rapid gestures (a double-tap on the
+   * power switch, or a click racing a hotkey) would otherwise build the eight
+   * track strips and the voice bank twice, leaking the first set into the live
+   * graph. Concurrent callers share the single in-flight promise.
    */
   public init(): Promise<void> {
+    if (this.initPromise !== null) {
+      return this.initPromise;
+    }
     if (this.isInitialized && this.manager.ctx !== null) {
       return this.manager.resume();
     }
 
-    // Synchronous: creates the AudioContext inside the gesture handler.
-    const ctx = this.manager.createGraph();
-    this.buildTrackStrips(ctx);
+    let ctx: AudioContext;
+    try {
+      // Everything up to resume() runs synchronously inside the caller's
+      // gesture handler, which is what iOS Safari requires to unlock audio.
+      ctx = this.manager.createGraph();
+      this.buildTrackStrips(ctx);
 
-    this.drums = new DrumSynthesizer(ctx);
-    this.synth = new SynthVoice(ctx);
-    this.scheduler = new LookaheadScheduler(
-      ctx,
-      () => {
-        const pattern = this.getPatternSnapshot?.();
-        return {
-          bpm: pattern?.bpm ?? 120,
-          swing: pattern?.swing ?? 0,
-          stepCount: pattern?.stepCount ?? 16,
-        };
-      },
-      (step, time) => this.handleScheduleStep(step, time),
-    );
+      this.drums = new DrumSynthesizer(ctx);
+      this.synth = new SynthVoice(ctx);
+      this.scheduler = new LookaheadScheduler(
+        ctx,
+        () => {
+          const pattern = this.getPatternSnapshot?.();
+          return {
+            bpm: pattern?.bpm ?? 120,
+            swing: pattern?.swing ?? 0,
+            stepCount: pattern?.stepCount ?? 16,
+          };
+        },
+        (step, time) => this.handleScheduleStep(step, time),
+      );
 
-    this.isInitialized = true;
-    // resume() is invoked before the first await resolves, satisfying the iOS
-    // unlock requirement.
-    const resumed = this.manager.resume();
+      this.isInitialized = true;
+    } catch (error) {
+      this.isInitialized = false;
+      this.initPromise = null;
+      return Promise.reject(
+        error instanceof Error ? error : new Error('Audio initialisation failed'),
+      );
+    }
+
     this.emit();
-    return resumed;
+    // resume() is invoked before the first await resolves.
+    const pending = this.manager.resume().finally(() => {
+      this.initPromise = null;
+    });
+    this.initPromise = pending;
+    return pending;
   }
 
   private buildTrackStrips(ctx: AudioContext): void {
@@ -331,6 +353,7 @@ export class AudioEngine {
     this.synth = null;
     this.scheduler = null;
     this.getPatternSnapshot = null;
+    this.initPromise = null;
     this.isInitialized = false;
     this.emit();
   }

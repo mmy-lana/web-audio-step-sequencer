@@ -108,6 +108,8 @@ export interface SequencerStoreState {
   duplicateSlotAction: (toSlot: number) => boolean;
   importPatternAction: (rawJson: string, fileSize?: number) => boolean;
   setRemoteChangeAvailable: (available: boolean) => void;
+  /** Mirrors the storage backend health into state without re-reading slots. */
+  syncStorageDiagnostics: () => void;
   reportStorageError: (message: string) => void;
   clearStorageError: () => void;
 }
@@ -348,10 +350,24 @@ export const useSequencerStore = create<SequencerStoreState>()((set, get) => ({
   updateMasterFx: (fx: MasterFxPatch): void => {
     set((state) => {
       const current = state.pattern.masterFx;
+      // Every nested field is resolved explicitly rather than spread, so a patch
+      // carrying an explicit `undefined` can never blank out a stored setting,
+      // and each nested object is rebuilt instead of shared.
       const next: MasterFxSettings = {
-        filter: sanitizeFilter({ ...current.filter, ...(fx.filter ?? {}) }),
-        delay: sanitizeDelay({ ...current.delay, ...(fx.delay ?? {}) }),
-        distortion: sanitizeDistortion({ ...current.distortion, ...(fx.distortion ?? {}) }),
+        filter: sanitizeFilter({
+          type: fx.filter?.type ?? current.filter.type,
+          cutoff: fx.filter?.cutoff ?? current.filter.cutoff,
+          resonance: fx.filter?.resonance ?? current.filter.resonance,
+        }),
+        delay: sanitizeDelay({
+          time: fx.delay?.time ?? current.delay.time,
+          feedback: fx.delay?.feedback ?? current.delay.feedback,
+          wetDry: fx.delay?.wetDry ?? current.delay.wetDry,
+        }),
+        distortion: sanitizeDistortion({
+          drive: fx.distortion?.drive ?? current.distortion.drive,
+          wetDry: fx.distortion?.wetDry ?? current.distortion.wetDry,
+        }),
         masterVolume:
           fx.masterVolume === undefined
             ? current.masterVolume
@@ -496,6 +512,10 @@ export const useSequencerStore = create<SequencerStoreState>()((set, get) => ({
 
   setRemoteChangeAvailable: (available: boolean): void => {
     set({ remoteChangeAvailable: available });
+  },
+
+  syncStorageDiagnostics: (): void => {
+    set({ ...storageFlags() });
   },
 
   reportStorageError: (message: string): void => {

@@ -73,6 +73,11 @@ export class AudioContextManager {
     if (this.ctx !== null && this.isInitialized) {
       return this.ctx;
     }
+    // A previous attempt may have created the context and then failed while
+    // wiring the graph. Tear that partial state down instead of leaking it.
+    if (this.ctx !== null) {
+      this.dispose();
+    }
 
     const scope = globalThis as unknown as AudioScope;
     const ContextConstructor = scope.AudioContext ?? scope.webkitAudioContext;

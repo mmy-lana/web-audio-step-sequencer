@@ -5,6 +5,24 @@ import { applyPitchOffset } from '@/lib/utils/audioMath';
 /** Shortest tail kept alive after a voice's amplitude envelope ends. */
 const SOURCE_TAIL_SECONDS = 0.02;
 
+/** One scheduled source plus the exact time it must stop. */
+interface DrumSourceEntry {
+  source: AudioScheduledSourceNode;
+  stopTime: number;
+}
+
+/**
+ * Every node owned by one percussion hit.
+ *
+ * Intermediates are tracked explicitly: disconnecting a stopped buffer source
+ * leaves its filter and gain still attached to the destination, which keeps the
+ * chain alive in the audio graph for the lifetime of the page.
+ */
+interface DrumVoiceNodes {
+  entries: DrumSourceEntry[];
+  intermediates: AudioNode[];
+}
+
 /**
  * Percussion voice bank.
  *
@@ -15,50 +33,85 @@ const SOURCE_TAIL_SECONDS = 0.02;
  */
 export class DrumSynthesizer {
   private readonly ctx: AudioContext;
-  private readonly activeSources = new Set<AudioScheduledSourceNode>();
+  private readonly activeNodes = new Set<DrumVoiceNodes>();
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
   }
 
-  /** Stops and detaches every voice currently sounding. */
-  public stopAll(): void {
-    this.activeSources.forEach((source) => {
+  /** Stops and detaches every node of a hit. Safe to call more than once. */
+  private detachVoice(voice: DrumVoiceNodes): void {
+    voice.entries.forEach((entry) => {
       try {
-        source.stop();
-      } catch {
-        // The source already ended.
-      }
-      try {
-        source.disconnect();
+        entry.source.disconnect();
       } catch {
         // Already detached.
       }
     });
-    this.activeSources.clear();
+    voice.intermediates.forEach((node) => {
+      try {
+        node.disconnect();
+      } catch {
+        // Already detached.
+      }
+    });
+  }
+
+  /** Stops and detaches every voice currently sounding. */
+  public stopAll(): void {
+    this.activeNodes.forEach((voice) => {
+      voice.entries.forEach((entry) => {
+        try {
+          entry.source.stop();
+        } catch {
+          // The source already ended.
+        }
+      });
+      this.detachVoice(voice);
+    });
+    this.activeNodes.clear();
   }
 
   /** Number of live sources, for the verification gate. */
   public getActiveSourceCount(): number {
-    return this.activeSources.size;
+    let total = 0;
+    this.activeNodes.forEach((voice) => {
+      total += voice.entries.length;
+    });
+    return total;
   }
 
-  private registerSource(source: AudioScheduledSourceNode, stopTime: number): void {
-    this.activeSources.add(source);
-    source.onended = () => {
-      this.activeSources.delete(source);
-      try {
-        source.disconnect();
-      } catch {
-        // Already detached.
-      }
+  /** Number of live hits, for the verification gate. */
+  public getActiveVoiceCount(): number {
+    return this.activeNodes.size;
+  }
+
+  /**
+   * Registers a hit. The voice is released only once every source has ended, so
+   * a two-source snare never detaches while its noise tail is still ringing.
+   */
+  private registerVoice(entries: DrumSourceEntry[], intermediates: AudioNode[]): void {
+    const voice: DrumVoiceNodes = { entries, intermediates };
+    this.activeNodes.add(voice);
+
+    let endedCount = 0;
+    const handleEnded = (): void => {
+      endedCount += 1;
+      if (endedCount < entries.length) return;
+      this.activeNodes.delete(voice);
+      this.detachVoice(voice);
     };
-    try {
-      source.stop(stopTime);
-    } catch {
-      // A source that already reached its stop time throws; nothing to do.
-      this.activeSources.delete(source);
-    }
+
+    entries.forEach((entry) => {
+      entry.source.onended = handleEnded;
+      try {
+        entry.source.stop(entry.stopTime);
+      } catch {
+        // A source that already reached its stop time throws, and its onended
+        // will never fire again, so account for it here.
+        handleEnded();
+      }
+    });
   }
 
   /** Noise voice helper: one looping buffer source with a random read offset. */
@@ -98,7 +151,7 @@ export class DrumSynthesizer {
     gain.connect(dest);
 
     osc.start(time);
-    this.registerSource(osc, time + decay + SOURCE_TAIL_SECONDS);
+    this.registerVoice([{ source: osc, stopTime: time + decay + SOURCE_TAIL_SECONDS }], [gain]);
   }
 
   public triggerSnare(
@@ -143,8 +196,13 @@ export class DrumSynthesizer {
     const buffer = noise.buffer;
     noise.start(time, buffer === null ? 0 : NoiseBufferPool.getRandomOffset(buffer));
     osc.start(time);
-    this.registerSource(noise, time + decay + SOURCE_TAIL_SECONDS);
-    this.registerSource(osc, time + 0.13);
+    this.registerVoice(
+      [
+        { source: noise, stopTime: time + decay + SOURCE_TAIL_SECONDS },
+        { source: osc, stopTime: time + 0.13 },
+      ],
+      [noiseFilter, noiseGain, oscGain],
+    );
   }
 
   public triggerHiHat(
@@ -175,7 +233,10 @@ export class DrumSynthesizer {
 
     const buffer = noise.buffer;
     noise.start(time, buffer === null ? 0 : NoiseBufferPool.getRandomOffset(buffer));
-    this.registerSource(noise, time + decay + SOURCE_TAIL_SECONDS);
+    this.registerVoice(
+      [{ source: noise, stopTime: time + decay + SOURCE_TAIL_SECONDS }],
+      [bandpass, gain],
+    );
   }
 
   public triggerClap(
@@ -189,6 +250,9 @@ export class DrumSynthesizer {
     const bursts = [0, 0.011, 0.024];
     const decay = params.envelope.decay;
     const safeVel = Math.max(0.001, vel);
+
+    const entries: DrumSourceEntry[] = [];
+    const intermediates: AudioNode[] = [];
 
     bursts.forEach((offset, index) => {
       const isFinal = index === bursts.length - 1;
@@ -211,8 +275,11 @@ export class DrumSynthesizer {
       // A distinct offset per burst prevents correlation artefacts.
       const buffer = noise.buffer;
       noise.start(time + offset, buffer === null ? 0 : NoiseBufferPool.getRandomOffset(buffer));
-      this.registerSource(noise, time + offset + burstLength + SOURCE_TAIL_SECONDS);
+      entries.push({ source: noise, stopTime: time + offset + burstLength + SOURCE_TAIL_SECONDS });
+      intermediates.push(filter, gain);
     });
+
+    this.registerVoice(entries, intermediates);
   }
 
   public triggerTom(
@@ -241,6 +308,6 @@ export class DrumSynthesizer {
     gain.connect(dest);
 
     osc.start(time);
-    this.registerSource(osc, time + decay + SOURCE_TAIL_SECONDS);
+    this.registerVoice([{ source: osc, stopTime: time + decay + SOURCE_TAIL_SECONDS }], [gain]);
   }
 }

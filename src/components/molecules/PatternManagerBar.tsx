@@ -199,13 +199,13 @@ export function PatternManagerBar({
           <span className="font-hardware text-[10px] text-status-warn">
             Overwrite slot {pad(pendingSaveSlot)}?
           </span>
-          <PushButton label="Confirm" onClick={confirmSave} variant="danger" size="sm" className="min-h-[32px]!" />
+          <PushButton label="Confirm" onClick={confirmSave} variant="danger" size="sm" className="min-h-[44px]! md:min-h-[32px]!" />
           <PushButton
             label="Cancel"
             onClick={() => setPendingSaveSlot(null)}
             variant="ghost"
             size="sm"
-            className="min-h-[32px]!"
+            className="min-h-[44px]! md:min-h-[32px]!"
           />
         </div>
       ) : null}
@@ -215,13 +215,13 @@ export function PatternManagerBar({
           <span className="font-hardware text-[10px] text-status-error">
             Erase slot {pad(pendingClearSlot)} permanently?
           </span>
-          <PushButton label="Erase" onClick={confirmClear} variant="danger" size="sm" className="min-h-[32px]!" />
+          <PushButton label="Erase" onClick={confirmClear} variant="danger" size="sm" className="min-h-[44px]! md:min-h-[32px]!" />
           <PushButton
             label="Cancel"
             onClick={() => setPendingClearSlot(null)}
             variant="ghost"
             size="sm"
-            className="min-h-[32px]!"
+            className="min-h-[44px]! md:min-h-[32px]!"
           />
         </div>
       ) : null}
@@ -297,7 +297,7 @@ export function PatternManagerBar({
               onClick={onDismissError}
               variant="ghost"
               size="sm"
-              className="min-h-[28px]!"
+              className="min-h-[44px]! md:min-h-[28px]!"
             />
           ) : null}
         </div>

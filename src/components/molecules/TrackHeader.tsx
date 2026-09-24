@@ -103,7 +103,7 @@ export function TrackHeader({
           color="crimson"
           variant="ghost"
           size="sm"
-          className="min-h-[36px]! px-2!"
+          className="min-h-[44px]! px-2! md:min-h-[36px]!"
         />
         <PushButton
           label="S"
@@ -113,7 +113,7 @@ export function TrackHeader({
           color="amber"
           variant="ghost"
           size="sm"
-          className="min-h-[36px]! px-2!"
+          className="min-h-[44px]! px-2! md:min-h-[36px]!"
         />
       </div>
 

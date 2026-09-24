@@ -71,7 +71,7 @@ export function PushButton({
     <button
       type={type}
       onClick={onClick}
-      disabled={disabled}
+      disabled={Boolean(disabled)}
       title={title}
       aria-label={ariaLabel ?? label}
       aria-pressed={isActive}

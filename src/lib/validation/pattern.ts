@@ -127,6 +127,68 @@ export const PatternSchema = z
 export const MAX_IMPORT_SIZE_BYTES = 500 * 1024; // 500 KB limit
 
 /**
+ * Keys that can be used to reach the prototype chain. `JSON.parse` alone creates
+ * them as own data properties rather than invoking the setters, but stripping
+ * them removes the hazard for any downstream code that copies or merges the
+ * parsed value key by key.
+ */
+const FORBIDDEN_JSON_KEYS: ReadonlySet<string> = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+]);
+
+/**
+ * Deepest accepted document nesting. A pattern is at most
+ * `pattern.tracks[].steps[]` — four levels — so this leaves generous headroom
+ * while rejecting payloads crafted to exhaust the stack during schema traversal.
+ */
+export const MAX_JSON_DEPTH = 32;
+
+/** Reviver that drops prototype-chain keys during parsing. */
+function stripPrototypeKeys(key: string, value: unknown): unknown {
+  return FORBIDDEN_JSON_KEYS.has(key) ? undefined : value;
+}
+
+/**
+ * Iterative depth measurement. Deliberately non-recursive so measuring a hostile
+ * payload cannot itself overflow the stack.
+ */
+export function measureJsonDepth(root: unknown): number {
+  if (typeof root !== 'object' || root === null) return 0;
+
+  let maxDepth = 0;
+  const stack: { value: unknown; depth: number }[] = [{ value: root, depth: 1 }];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined) break;
+    if (current.depth > maxDepth) maxDepth = current.depth;
+    if (maxDepth > MAX_JSON_DEPTH) return maxDepth;
+
+    const { value, depth } = current;
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        const item: unknown = value[i];
+        if (typeof item === 'object' && item !== null) {
+          stack.push({ value: item, depth: depth + 1 });
+        }
+      }
+      continue;
+    }
+    if (typeof value === 'object' && value !== null) {
+      for (const nested of Object.values(value)) {
+        if (typeof nested === 'object' && nested !== null) {
+          stack.push({ value: nested, depth: depth + 1 });
+        }
+      }
+    }
+  }
+
+  return maxDepth;
+}
+
+/**
  * UTF-8 aware byte measurement used by every size gate.
  * Falls back to a conservative UTF-16 estimate when `TextEncoder` is unavailable.
  */
@@ -164,9 +226,14 @@ export function validatePatternJson(rawJson: string): z.infer<typeof PatternSche
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(rawJson);
+    // The reviver drops `__proto__`, `constructor` and `prototype` while the
+    // document is being built, before any downstream code can touch it.
+    parsed = JSON.parse(rawJson, stripPrototypeKeys);
   } catch {
     throw new Error('Malformed JSON payload');
+  }
+  if (measureJsonDepth(parsed) > MAX_JSON_DEPTH) {
+    throw new Error(`Pattern payload is nested deeper than the ${MAX_JSON_DEPTH} level limit`);
   }
   const result = PatternSchema.safeParse(parsed);
   if (!result.success) {

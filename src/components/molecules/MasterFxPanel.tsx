@@ -79,7 +79,7 @@ export function MasterFxPanel({
                 color="cyan"
                 variant="secondary"
                 size="sm"
-                className="min-h-[36px]! px-1! text-[9px]!"
+                className="min-h-[44px]! px-1! text-[9px]! md:min-h-[36px]!"
               />
             ))}
           </div>

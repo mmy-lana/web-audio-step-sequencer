@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import type { ReactElement } from 'react';
 import type { TrackColor } from '@/types/audio';
 import { COLOR_MAP } from '@/lib/constants/colorMap';
@@ -76,6 +77,9 @@ export function MechanicalSwitch({
   className = '',
 }: MechanicalSwitchProps): ReactElement {
   const accent = COLOR_MAP[color];
+  // `useId` guarantees a unique id, so two switches that share a label never
+  // collide on the DOM id their `aria-describedby` points at.
+  const stateDescriptionId = useId();
 
   const body = ((): ReactElement => {
     if (variant === 'rocker') {
@@ -141,6 +145,7 @@ export function MechanicalSwitch({
       role="switch"
       aria-checked={isOn}
       aria-label={label}
+      aria-describedby={stateDescriptionId}
       disabled={disabled}
       onClick={onToggle}
       className={`inline-flex min-h-[44px] min-w-[44px] select-none flex-col items-center justify-center gap-1 rounded px-1 py-1 transition-opacity ${
@@ -157,6 +162,9 @@ export function MechanicalSwitch({
             intensity={isOn ? 'high' : 'low'}
           />
         ) : null}
+      </span>
+      <span id={stateDescriptionId} className="sr-only">
+        {isOn ? 'on' : 'off'}
       </span>
       {!hideLabel ? (
         <span className={`engraved-label font-hardware ${LABEL_CLASSES[size]}`}>{label}</span>
