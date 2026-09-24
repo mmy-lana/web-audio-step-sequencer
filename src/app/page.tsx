@@ -141,17 +141,38 @@ export default function HomePage(): ReactElement {
     [importPatternAction, reportStorageError],
   );
 
+  /* ---------------------------------------------------------- slot loading */
+  /**
+   * Slot that a dirty working copy is currently blocked on. The confirmation
+   * itself is rendered by the pattern bay, so no native dialog is involved and
+   * the scheduler keeps running while the user decides.
+   */
+  const [pendingSlotLoad, setPendingSlotLoad] = useState<number | null>(null);
+
   const handleSelectSlot = useCallback(
     (slot: number): void => {
       const outcome = loadSlotAction(slot);
-      if (outcome !== 'dirty_conflict') return;
-      const confirmed = window.confirm(
-        'The working copy has unsaved changes. Discard them and load the slot?',
-      );
-      if (confirmed) loadSlotAction(slot, true);
+      // A dirty conflict is parked for an inline decision instead of a native
+      // browser dialog: that API is synchronous and would stall the audio
+      // lookahead scheduler for as long as the dialog stays open.
+      if (outcome === 'dirty_conflict') {
+        setPendingSlotLoad(slot);
+        return;
+      }
+      setPendingSlotLoad(null);
     },
     [loadSlotAction],
   );
+
+  const handleConfirmSlotLoad = useCallback((): void => {
+    if (pendingSlotLoad === null) return;
+    loadSlotAction(pendingSlotLoad, true);
+    setPendingSlotLoad(null);
+  }, [loadSlotAction, pendingSlotLoad]);
+
+  const handleCancelSlotLoad = useCallback((): void => {
+    setPendingSlotLoad(null);
+  }, []);
 
   /* -------------------------------------------------------------- header */
   const header = (
@@ -337,6 +358,9 @@ export default function HomePage(): ReactElement {
       isUsingMemoryFallback={persistence.isUsingMemoryFallback}
       isQuotaExceeded={persistence.isQuotaExceeded}
       onSelectSlot={handleSelectSlot}
+      pendingLoadSlot={pendingSlotLoad}
+      onConfirmLoad={handleConfirmSlotLoad}
+      onCancelLoad={handleCancelSlotLoad}
       onSaveToSlot={(slot) => {
         // The bar already confirmed any overwrite against slot metadata.
         saveSlotAction(slot, true);

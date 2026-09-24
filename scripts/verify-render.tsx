@@ -8,6 +8,8 @@
  * failures, so missing keys, invalid attributes and bad ARIA wiring all fail the
  * gate rather than scrolling past in the console.
  */
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createElement } from 'react';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -127,6 +129,9 @@ function render(label: string, element: ReactElement | null): string {
 }
 
 /* ------------------------------------------------------------------ fixtures */
+
+/** Application source root, scanned for blocking browser dialogs. */
+const SOURCE_ROOT = join(process.cwd(), 'src');
 
 const pattern = createDefaultPattern(1);
 const track = createDefaultTrack(0, 16);
@@ -529,6 +534,65 @@ const managerFallbackHtml = render(
   }),
 );
 check('manager warns about the memory fallback', managerFallbackHtml.includes('Persistent storage is unavailable'));
+
+/* ------------------------------------------- 4b. non-blocking slot loading */
+
+section('Non-blocking slot load confirmation');
+check(
+  'the idle bay renders no load confirmation',
+  !managerHtml.includes('data-slot-load-confirm'),
+);
+
+const pendingLoadHtml = render(
+  'PatternManagerBar (pending slot load)',
+  createElement(PatternManagerBar, {
+    activeSlot: 2,
+    isDirty: true,
+    onSelectSlot: () => undefined,
+    onSaveToSlot: () => undefined,
+    onClearSlot: () => undefined,
+    onDuplicateSlot: () => undefined,
+    onExport: () => undefined,
+    onImport: () => undefined,
+    slotMetadata,
+    patternName: 'PATTERN 2',
+    pendingLoadSlot: 4,
+    onConfirmLoad: () => undefined,
+    onCancelLoad: () => undefined,
+  }),
+);
+check('the pending bay renders the confirmation row', pendingLoadHtml.includes('data-slot-load-confirm'));
+check('the confirmation names the target slot', pendingLoadHtml.includes('load slot 04'));
+check('the confirmation offers a discard action', pendingLoadHtml.includes('aria-label="Discard unsaved changes and load slot 04"'));
+check('the confirmation offers a cancel action', pendingLoadHtml.includes('aria-label="Keep the current pattern"'));
+check('the confirmation uses the existing inline warning styling', pendingLoadHtml.includes('border-status-warn/50 bg-status-warn/10'));
+check(
+  'the confirmation keeps the slot grid and actions reachable',
+  countOccurrences(pendingLoadHtml, 'aria-label="Load slot') === 8 &&
+    pendingLoadHtml.includes('aria-label="Save pattern to slot 2"'),
+);
+
+// The whole application must stay free of synchronous blocking dialogs, which
+// would freeze the audio lookahead scheduler while they are open.
+function collectSourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return collectSourceFiles(path);
+    return /\.(ts|tsx)$/.test(entry.name) ? [path] : [];
+  });
+}
+
+const sourceFiles = collectSourceFiles(SOURCE_ROOT);
+check('the source scan covers the application tree', sourceFiles.length > 20);
+const blockingDialogs = sourceFiles
+  .map((file) => ({ file, text: readFileSync(file, 'utf8') }))
+  .filter(({ text }) => /\b(window\.)?(confirm|alert|prompt)\s*\(/.test(text))
+  .map(({ file }) => file);
+check(
+  'no source file opens a blocking browser dialog',
+  blockingDialogs.length === 0,
+  blockingDialogs.join(', '),
+);
 
 /* --------------------------------------------------------- 4. grid integrity */
 

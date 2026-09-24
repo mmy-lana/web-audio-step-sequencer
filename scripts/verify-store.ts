@@ -22,6 +22,7 @@ import { STORAGE_KEYS } from '../src/lib/constants/storageKeys';
 import {
   clearWorkingCopy,
   exportPatternToJson,
+  loadPatternFromSlot,
   safeStorage,
 } from '../src/lib/storage/patternStorage';
 import {
@@ -360,6 +361,38 @@ check('clear empties the slot', cleared !== undefined && cleared.isEmpty);
 state().setBpm(90);
 state().clearSlotAction(state().activeSlot);
 check('clearing the active slot marks the pattern dirty', state().isDirty);
+
+/* ------------------------------------------- 6b. dirty slot load (no dialog) */
+
+section('Dirty slot load guard');
+resetStorage();
+resetStore();
+state().hydrateFromStorage();
+
+// Two populated slots, with the second one left active and then edited.
+equal('slot 4 saves the factory copy', state().saveSlotAction(4), 'saved');
+equal('slot 2 saves the factory copy', state().saveSlotAction(2, true), 'saved');
+equal('the working copy is active on slot 2', state().activeSlot, 2);
+state().setBpm(148);
+check('the working copy is dirty', state().isDirty);
+
+const spuriousConflict = state().loadSlotAction(4);
+equal('a dirty slot load reports a conflict instead of loading', spuriousConflict, 'dirty_conflict');
+equal('the conflict keeps the working tempo', state().pattern.bpm, 148);
+equal('the conflict keeps the working slot field', state().pattern.slot, 2);
+equal('the conflict keeps the active slot', state().activeSlot, 2);
+check('the conflict stays dirty', state().isDirty);
+equal('the conflict raises no storage error', state().storageError, null);
+equal('the conflict leaves the stored slot untouched', loadPatternFromSlot(4).data?.bpm, 120);
+
+// Cancelling is a no-op by construction: the conflict path never mutated state.
+equal('cancelling preserves the working tempo', state().pattern.bpm, 148);
+equal('cancelling preserves the active slot', state().activeSlot, 2);
+
+equal('a confirmed load discards the working copy', state().loadSlotAction(4, true), 'loaded');
+equal('a confirmed load adopts the target slot', state().activeSlot, 4);
+equal('a confirmed load restores the stored tempo', state().pattern.bpm, 120);
+equal('a confirmed load clears the dirty flag', state().isDirty, false);
 
 /* ---------------------------------------------------------------- 7. import */
 

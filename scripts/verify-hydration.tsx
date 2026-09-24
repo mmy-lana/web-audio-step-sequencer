@@ -422,6 +422,138 @@ async function main(): Promise<void> {
   getAudioEngine().dispose();
   restoreAudio();
 
+  /* ------------------------------------------- non-blocking slot loading */
+  // The whole flow is driven through the real screen: a dirty working copy, a
+  // populated target slot, and an instrumented native-dialog surface.
+  section('Non-blocking slot load confirmation');
+  let storedTempo = 0;
+  await act(async () => {
+    equal('slot 3 accepts the working copy', useSequencerStore.getState().saveSlotAction(3, true), 'saved');
+    equal(
+      'slot 2 accepts the working copy',
+      useSequencerStore.getState().saveSlotAction(2, true),
+      'saved',
+    );
+    storedTempo = useSequencerStore.getState().pattern.bpm;
+    useSequencerStore.getState().setBpm(148);
+  });
+  check('the working copy is dirty before the switch', useSequencerStore.getState().isDirty);
+  check(
+    'the target slot is populated',
+    useSequencerStore.getState().slotMetadata.find((entry) => entry.slot === 3)?.isEmpty === false,
+  );
+
+  let nativeDialogCalls = 0;
+  const stubDialog = (): boolean => {
+    nativeDialogCalls += 1;
+    return false;
+  };
+  (dom.window as unknown as { confirm: () => boolean }).confirm = stubDialog;
+  installGlobal('confirm', stubDialog);
+  check('the native dialog surface is instrumented', dom.window.confirm === stubDialog);
+
+  const findButtons = (labelPrefix: string): HTMLButtonElement[] =>
+    Array.from(dom.window.document.querySelectorAll('button')).filter((button) =>
+      (button.getAttribute('aria-label') ?? '').startsWith(labelPrefix),
+    );
+
+  const slotThreeButtons = findButtons('Load slot 3');
+  check('the slot 3 button is rendered', slotThreeButtons.length > 0);
+
+  const captureSlotClick = captureConsole();
+  await act(async () => {
+    slotThreeButtons[0]?.click();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+  });
+  const slotClickMessages = captureSlotClick.messages;
+  captureSlotClick.restore();
+
+  equal('no native dialog is opened while the copy is dirty', nativeDialogCalls, 0);
+  equal(
+    'the dirty switch does not load the slot synchronously',
+    useSequencerStore.getState().activeSlot,
+    2,
+  );
+  equal(
+    'the dirty switch leaves the working tempo alone',
+    useSequencerStore.getState().pattern.bpm,
+    148,
+  );
+  check(
+    'the confirmation row is rendered',
+    dom.window.document.querySelectorAll('[data-slot-load-confirm]').length > 0,
+  );
+  check(
+    'the confirmation names the target slot',
+    dom.window.document.body.textContent?.includes('load slot 03') === true,
+  );
+  check(
+    'the click emits no React warnings',
+    slotClickMessages.length === 0,
+    slotClickMessages.slice(0, 2).join(' | '),
+  );
+
+  const cancelButton = findButtons('Keep the current pattern')[0];
+  check('the cancel action is rendered', cancelButton !== undefined);
+  await act(async () => {
+    cancelButton?.click();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  });
+  equal(
+    'cancelling dismisses the confirmation',
+    dom.window.document.querySelectorAll('[data-slot-load-confirm]').length,
+    0,
+  );
+  equal(
+    'cancelling preserves the working tempo',
+    useSequencerStore.getState().pattern.bpm,
+    148,
+  );
+  equal('cancelling preserves the active slot', useSequencerStore.getState().activeSlot, 2);
+  check('cancelling stays dirty', useSequencerStore.getState().isDirty);
+  equal('cancelling opens no native dialog', nativeDialogCalls, 0);
+
+  const captureConfirmClick = captureConsole();
+  await act(async () => {
+    findButtons('Load slot 3')[0]?.click();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  });
+  const reopenMessages = captureConfirmClick.messages;
+  captureConfirmClick.restore();
+  check(
+    'selecting the slot again re-opens the confirmation',
+    dom.window.document.querySelectorAll('[data-slot-load-confirm]').length > 0,
+  );
+  check(
+    're-opening the confirmation emits no warnings',
+    reopenMessages.length === 0,
+    reopenMessages.slice(0, 2).join(' | '),
+  );
+
+  const confirmLoadButton = findButtons('Discard unsaved changes and load slot 03')[0];
+  check('the confirm action is rendered', confirmLoadButton !== undefined);
+  await act(async () => {
+    confirmLoadButton?.click();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+  });
+  equal('confirming loads the target slot', useSequencerStore.getState().activeSlot, 3);
+  equal('confirming restores the stored tempo', useSequencerStore.getState().pattern.bpm, storedTempo);
+  check('confirming clears the dirty flag', !useSequencerStore.getState().isDirty);
+  equal(
+    'confirming dismisses the confirmation',
+    dom.window.document.querySelectorAll('[data-slot-load-confirm]').length,
+    0,
+  );
+  equal('confirming opens no native dialog', nativeDialogCalls, 0);
+
   section('Shared element descriptor probe');
   // Settles whether reusing one element object at two tree positions is itself
   // a hydration hazard, independent of the app code.

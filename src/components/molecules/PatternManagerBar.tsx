@@ -28,6 +28,15 @@ export interface PatternManagerBarProps {
   isQuotaExceeded?: boolean;
   patternName?: string;
   className?: string;
+  /**
+   * Slot awaiting a dirty-conflict decision. The owner reports the conflict and
+   * parks the target here instead of opening a blocking native dialog.
+   */
+  pendingLoadSlot?: number | null;
+  /** Confirms the parked slot load, discarding the unsaved working copy. */
+  onConfirmLoad?: () => void;
+  /** Dismisses the parked slot load and keeps the working copy untouched. */
+  onCancelLoad?: () => void;
 }
 
 const SLOT_NUMBERS: readonly number[] = Array.from(
@@ -53,7 +62,9 @@ function formatTimestamp(timestamp: number): string {
 
 /**
  * Pattern memory bay: eight save slots plus save / clear / duplicate / export /
- * import. Destructive actions require an inline two-step confirmation.
+ * import. Destructive actions require an inline two-step confirmation, including
+ * the discard-and-load decision for a dirty working copy, which is rendered here
+ * rather than through a blocking native dialog.
  */
 export function PatternManagerBar({
   activeSlot,
@@ -71,6 +82,9 @@ export function PatternManagerBar({
   isQuotaExceeded = false,
   patternName,
   className = '',
+  pendingLoadSlot = null,
+  onConfirmLoad,
+  onCancelLoad,
 }: PatternManagerBarProps): ReactElement {
   const [pendingSaveSlot, setPendingSaveSlot] = useState<number | null>(null);
   const [pendingClearSlot, setPendingClearSlot] = useState<number | null>(null);
@@ -193,6 +207,39 @@ export function PatternManagerBar({
           );
         })}
       </div>
+
+      {/*
+        Dirty-conflict decision for a slot load. Rendered inline so nothing
+        blocks the audio thread, and deliberately without auto-focus or a focus
+        trap: the row sits in normal tab order after the slot grid, so keyboard
+        users reach Confirm / Cancel with Tab and can leave the row at any time.
+      */}
+      {pendingLoadSlot !== null ? (
+        <div
+          data-slot-load-confirm="true"
+          className="mt-3 flex flex-wrap items-center gap-2 rounded border border-status-warn/50 bg-status-warn/10 p-2"
+        >
+          <span className="font-hardware text-[10px] text-status-warn">
+            Discard unsaved changes and load slot {pad(pendingLoadSlot)}?
+          </span>
+          <PushButton
+            label="Confirm"
+            ariaLabel={`Discard unsaved changes and load slot ${pad(pendingLoadSlot)}`}
+            onClick={onConfirmLoad ?? (() => undefined)}
+            variant="danger"
+            size="sm"
+            className="min-h-[44px]! md:min-h-[32px]!"
+          />
+          <PushButton
+            label="Cancel"
+            ariaLabel="Keep the current pattern"
+            onClick={onCancelLoad ?? (() => undefined)}
+            variant="ghost"
+            size="sm"
+            className="min-h-[44px]! md:min-h-[32px]!"
+          />
+        </div>
+      ) : null}
 
       {pendingSaveSlot !== null ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded border border-status-warn/50 bg-status-warn/10 p-2">
