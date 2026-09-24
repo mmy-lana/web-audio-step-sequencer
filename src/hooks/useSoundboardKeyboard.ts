@@ -20,21 +20,63 @@ export interface SoundboardKeyboardState {
   flashToken: number;
 }
 
-/** Tags that swallow global hotkeys while the user is typing. */
-const TEXT_ENTRY_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+/**
+ * Controls that own the keyboard while they hold focus.
+ *
+ * `closest` is used from the event target upwards, so a key pressed on a
+ * `<span>` inside a `<button>` still counts as the button's key.
+ */
+const INTERACTIVE_SELECTOR = [
+  // Native interactive elements.
+  'input',
+  'textarea',
+  'select',
+  'button',
+  'a[href]',
+  'summary',
+  // Every value that makes a region editable, including plain-text mode.
+  '[contenteditable=""]',
+  '[contenteditable="true"]',
+  '[contenteditable="plaintext-only"]',
+  // ARIA widgets that own Space, Enter or the arrow keys while focused. The
+  // instrument itself renders tabs, switches and sliders, so these matter here.
+  '[role="button"]',
+  '[role="slider"]',
+  '[role="switch"]',
+  '[role="tab"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="textbox"]',
+  '[role="combobox"]',
+  '[role="listbox"]',
+  '[role="option"]',
+  '[role="spinbutton"]',
+  '[role="menuitem"]',
+].join(',');
 
-function isTextEntryTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (TEXT_ENTRY_TAGS.has(target.tagName)) return true;
-  return target.isContentEditable;
+/**
+ * True when a key event belongs to a focused interactive control.
+ *
+ * Space is the global transport shortcut, but it is also the activation key of
+ * every native button and ARIA widget, so a focused control has to win: without
+ * this guard one keystroke would press the control and toggle the transport.
+ */
+export function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest(INTERACTIVE_SELECTOR) !== null) return true;
+  // Covers editable state that carries no attribute of its own, such as an
+  // inherited edit host or `document.designMode`. The property is missing
+  // outside a browser document, hence the explicit comparison.
+  return target instanceof HTMLElement && target.isContentEditable === true;
 }
 
 /**
  * Global soundboard hotkeys.
  *
  * Held keys are ignored (`repeat`), modifier chords are left to the browser, and
- * any focused text field disables the listener so typing never fires a pad.
- * Spacebar toggles the transport.
+ * any focused interactive control takes precedence over the global shortcuts so
+ * typing and Space-activatable controls behave normally. Spacebar toggles the
+ * transport everywhere else.
  */
 export function useSoundboardKeyboard({
   pads = SOUNDBOARD_PRESET_TEMPLATES,
@@ -66,7 +108,7 @@ export function useSoundboardKeyboard({
     if (!current.enabled) return;
     if (event.repeat) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (isTextEntryTarget(event.target)) return;
+    if (isInteractiveTarget(event.target)) return;
 
     if (event.code === 'Space' || event.key === ' ') {
       if (current.onToggleTransport === undefined) return;

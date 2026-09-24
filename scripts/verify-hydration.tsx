@@ -17,7 +17,9 @@ import { JSDOM } from 'jsdom';
 import HomePage from '../src/app/page';
 import { useSequencerStore } from '../src/store/useSequencerStore';
 import { createDefaultPattern } from '../src/lib/constants/defaultPatterns';
+import { SOUNDBOARD_PRESET_TEMPLATES } from '../src/lib/constants/soundboardPresets';
 import { getAudioEngine } from '../src/lib/audio/AudioEngine';
+import { isInteractiveTarget, useSoundboardKeyboard } from '../src/hooks/useSoundboardKeyboard';
 import { StereoVuMeter } from '../src/components/molecules/StereoVuMeter';
 import { FakeAudioContext, installFakeAudioContext } from './fakeWebAudio';
 
@@ -670,6 +672,156 @@ async function main(): Promise<void> {
     savedState.slotMetadata.find((entry) => entry.slot === 7)?.isEmpty === false,
   );
   check('the empty-slot flow emits no console noise', emptySaveMessages.length === 0, emptySaveMessages.slice(0, 2).join(' | '));
+
+  /* ------------------------------------------------ global keyboard routing */
+  section('Global shortcut target handling');
+  // A dedicated document, so only this harness listens to the keys dispatched
+  // here. The root screen keeps its own listener on the root document.
+  const keyboardDom = new JSDOM('<!doctype html><html><body></body></html>', {
+    pretendToBeVisual: true,
+    url: 'http://localhost:3000/',
+  });
+  installDom(keyboardDom);
+
+  const triggeredPads: string[] = [];
+  let transportToggles = 0;
+  function KeyboardHarness(): ReactElement {
+    useSoundboardKeyboard({
+      onTriggerPad: (pad) => {
+        triggeredPads.push(pad.id);
+      },
+      onToggleTransport: () => {
+        transportToggles += 1;
+      },
+      enabled: true,
+    });
+    return createElement('span', { 'data-keyboard-harness': 'true' }, 'KEYBOARD HARNESS');
+  }
+
+  const keyboardContainer = keyboardDom.window.document.createElement('div');
+  keyboardDom.window.document.body.appendChild(keyboardContainer);
+  const { createRoot: createKeyboardRoot } = await import('react-dom/client');
+  const keyboardRoot = createKeyboardRoot(keyboardContainer);
+  await act(async () => {
+    keyboardRoot.render(createElement(KeyboardHarness));
+  });
+  check(
+    'the keyboard harness is mounted',
+    keyboardDom.window.document.querySelector('[data-keyboard-harness]') !== null,
+  );
+
+  const keyboardDocument = keyboardDom.window.document;
+  const padKey = SOUNDBOARD_PRESET_TEMPLATES[0].keyBinding;
+
+  /** Dispatches a keydown and reports whether the page default was prevented. */
+  const pressKey = async (
+    key: string,
+    target: Element,
+    init: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; repeat?: boolean } = {},
+  ): Promise<boolean> => {
+    const event = new keyboardDom.window.KeyboardEvent('keydown', {
+      key,
+      code: key === ' ' ? 'Space' : `Key${key.toUpperCase()}`,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    await act(async () => {
+      target.dispatchEvent(event);
+    });
+    return event.defaultPrevented;
+  };
+
+  const createElementInDom = <K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    attributes: Record<string, string> = {},
+  ): HTMLElementTagNameMap[K] => {
+    const element = keyboardDocument.createElement(tag);
+    Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
+    keyboardDocument.body.appendChild(element);
+    element.focus();
+    return element;
+  };
+
+  // Space outside any control keeps driving the transport.
+  let togglesBefore = transportToggles;
+  const bodyPrevented = await pressKey(' ', keyboardDocument.body);
+  equal('space on the document body toggles the transport', transportToggles - togglesBefore, 1);
+  check('the global space shortcut is still prevented', bodyPrevented);
+
+  // Space inside interactive controls must stay with the control.
+  const plainButton = createElementInDom('button');
+  const nestedButtonSpan = keyboardDocument.createElement('span');
+  nestedButtonSpan.textContent = 'PLAY';
+  plainButton.appendChild(nestedButtonSpan);
+  const roleButton = createElementInDom('div', { role: 'button', tabindex: '0' });
+  const roleSlider = createElementInDom('div', { role: 'slider', tabindex: '0' });
+  const roleSwitch = createElementInDom('div', { role: 'switch', tabindex: '0' });
+  const roleTab = createElementInDom('div', { role: 'tab', tabindex: '0' });
+  const textInput = createElementInDom('input');
+  const textArea = createElementInDom('textarea');
+  const selectBox = createElementInDom('select');
+  const editableBox = createElementInDom('div', { contenteditable: 'true' });
+  const nestedEditableSpan = keyboardDocument.createElement('span');
+  editableBox.appendChild(nestedEditableSpan);
+
+  const interactiveTargets: ReadonlyArray<readonly [string, Element]> = [
+    ['a button', plainButton],
+    ['a span nested inside a button', nestedButtonSpan],
+    ['a role=button control', roleButton],
+    ['a role=slider control', roleSlider],
+    ['a role=switch control', roleSwitch],
+    ['a role=tab control', roleTab],
+    ['an input', textInput],
+    ['a textarea', textArea],
+    ['a select', selectBox],
+    ['a contenteditable region', editableBox],
+    ['a span nested inside a contenteditable region', nestedEditableSpan],
+  ];
+
+  for (const [description, target] of interactiveTargets) {
+    const before = transportToggles;
+    const prevented = await pressKey(' ', target);
+    equal(`space on ${description} does not toggle the transport`, transportToggles - before, 0);
+    check(`space on ${description} is left to the control`, !prevented);
+    check(
+      `${description} is classified as interactive`,
+      isInteractiveTarget(target),
+    );
+  }
+
+  // Pad hotkeys keep working outside controls and stay out of focused ones.
+  let padsBefore = triggeredPads.length;
+  const padKeyPrevented = await pressKey(padKey, keyboardDocument.body);
+  equal('a pad hotkey fires on the document body', triggeredPads.length - padsBefore, 1);
+  check('the pad hotkey is prevented globally', padKeyPrevented);
+  padsBefore = triggeredPads.length;
+  await pressKey(padKey, plainButton);
+  equal('a pad hotkey does not fire while a button is focused', triggeredPads.length - padsBefore, 0);
+  padsBefore = triggeredPads.length;
+  await pressKey(padKey, textInput);
+  equal('a pad hotkey does not fire while an input is focused', triggeredPads.length - padsBefore, 0);
+
+  // Modifier chords and held keys stay with the browser.
+  togglesBefore = transportToggles;
+  await pressKey(' ', keyboardDocument.body, { ctrlKey: true });
+  await pressKey(' ', keyboardDocument.body, { metaKey: true });
+  await pressKey(' ', keyboardDocument.body, { altKey: true });
+  await pressKey(' ', keyboardDocument.body, { repeat: true });
+  equal('modifier chords and held keys never toggle the transport', transportToggles - togglesBefore, 0);
+
+  padsBefore = triggeredPads.length;
+  await pressKey(padKey, keyboardDocument.body, { repeat: true });
+  equal('a held pad key fires once', triggeredPads.length - padsBefore, 0);
+
+  check(
+    'non-interactive targets stay global',
+    isInteractiveTarget(keyboardDocument.body) === false && isInteractiveTarget(null) === false,
+  );
+
+  await act(async () => {
+    keyboardRoot.unmount();
+  });
 
   /* ------------------------------------------------ meter update suppression */
   section('Meter update suppression');
