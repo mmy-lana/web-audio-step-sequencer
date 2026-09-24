@@ -128,7 +128,7 @@ export function MechanicalSwitch({
       >
         <span
           className={`pad-face absolute rounded-full border border-black/50 transition-transform duration-150 ${KNOB_CLASSES[size]} ${
-            isOn ? 'translate-x-[calc(100%+0.25rem)]' : 'translate-x-0'
+            isOn ? 'translate-x-[calc(100%_+_0.25rem)]' : 'translate-x-0'
           }`}
         />
       </span>

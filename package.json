@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "verify:defaults": "tsx scripts/verify-defaults.ts"
+    "typecheck": "tsc --noEmit",
+    "verify:defaults": "tsx scripts/verify-defaults.ts",
+    "verify:store": "tsx scripts/verify-store.ts",
+    "verify:render": "tsx scripts/verify-render.tsx",
+    "verify": "pnpm run typecheck && pnpm run verify:defaults && pnpm run verify:store && pnpm run verify:render"
   },
   "dependencies": {
     "next": "latest",

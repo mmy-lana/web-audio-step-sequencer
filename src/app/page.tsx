@@ -50,7 +50,7 @@ export default function PrimitiveBenchPage(): ReactElement {
   const meterLevel = isPowered ? roundTo(masterVolume / 1.2, 3) : 0;
 
   return (
-    <main className="h-viewport flex flex-col items-center bg-chassis-bg px-3 py-6 pb-[calc(env(safe-area-inset-bottom)+5rem)] text-ink">
+    <main className="h-viewport flex flex-col items-center bg-chassis-bg px-3 py-6 pb-[calc(env(safe-area-inset-bottom)_+_5rem)] text-ink">
       <div className="w-full max-w-5xl">
         {/* ---------------------------------------------------------- chassis */}
         <section className="chassis-panel relative p-4 sm:p-6">
@@ -232,7 +232,7 @@ export default function PrimitiveBenchPage(): ReactElement {
                   color="crimson"
                   variant="ghost"
                   size="sm"
-                  className="!min-h-[32px] !px-2"
+                  className="min-h-[32px]! px-2!"
                 />
                 <PushButton
                   label="S"
@@ -242,7 +242,7 @@ export default function PrimitiveBenchPage(): ReactElement {
                   color="amber"
                   variant="ghost"
                   size="sm"
-                  className="!min-h-[32px] !px-2"
+                  className="min-h-[32px]! px-2!"
                 />
               </div>
             ))}
