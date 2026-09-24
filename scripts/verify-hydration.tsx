@@ -299,6 +299,19 @@ async function main(): Promise<void> {
     `duplicates: ${Array.from(new Set(duplicateIds)).join(', ')}`,
   );
 
+  const hydratedEars = Array.from(dom.window.document.querySelectorAll('.rack-ear'));
+  equal('the hydrated chassis keeps two rack ears', hydratedEars.length, 2);
+  check(
+    'each hydrated rack ear keeps four screws',
+    hydratedEars.every((ear) => ear.querySelectorAll('.hex-screw').length === 4),
+  );
+  check(
+    'the hydrated ear screws are distributed by flexbox',
+    hydratedEars.every((ear) =>
+      ['flex-col', 'items-center', 'justify-between'].every((name) => ear.classList.contains(name)),
+    ),
+  );
+
   const described = Array.from(
     dom.window.document.querySelectorAll('[aria-describedby]'),
   ).map((element) => element.getAttribute('aria-describedby') ?? '');

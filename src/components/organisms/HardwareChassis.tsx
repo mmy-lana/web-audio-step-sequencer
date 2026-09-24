@@ -18,13 +18,16 @@ export interface HardwareChassisProps {
   className?: string;
 }
 
-/** Static screw positions on the rack ears, written as literal classes. */
-const EAR_SCREW_POSITIONS: readonly string[] = [
-  'top-[12%]',
-  'top-[38%]',
-  'top-[64%]',
-  'top-[88%]',
-];
+/**
+ * Slot rotations for the four screws per ear, in top-to-bottom order. Kept as
+ * literals so the hand-assembled look stays irregular but reproducible.
+ */
+const EAR_SCREW_ANGLES: readonly number[] = [0, 47, 94, 141];
+const EAR_SCREW_ANGLES_RIGHT: readonly number[] = [15, 46, 77, 108];
+
+/** Shared ear classes: a flex column so the screws distribute over any height. */
+const EAR_BASE_CLASSES =
+  'rack-ear pointer-events-none absolute inset-y-0 z-10 hidden w-9 flex-col items-center justify-between py-6 lg:flex xl:w-10';
 
 /**
  * Rack frame.
@@ -49,30 +52,19 @@ export function HardwareChassis({
   return (
     <div className={`relative min-h-[100dvh] bg-chassis-bg ${className}`}>
       {/* ------------------------------------------------------------ ears */}
-      <div
-        aria-hidden="true"
-        className="rack-ear pointer-events-none absolute inset-y-0 left-0 z-10 hidden w-9 border-r lg:block xl:w-10"
-      >
-        {EAR_SCREW_POSITIONS.map((position, index) => (
-          <ChassisScrew
-            key={`left-${position}`}
-            size="lg"
-            angle={index * 47}
-            className={`absolute left-1/2 -translate-x-1/2 ${position}`}
-          />
+      {/*
+        The screws are laid out by flex distribution rather than by percentage
+        offsets, so four of them stay evenly spread down the rack ear at any
+        chassis height instead of drifting with the aspect ratio.
+      */}
+      <div aria-hidden="true" className={`${EAR_BASE_CLASSES} left-0 border-r`}>
+        {EAR_SCREW_ANGLES.map((angle) => (
+          <ChassisScrew key={`left-${angle}`} size="lg" angle={angle} />
         ))}
       </div>
-      <div
-        aria-hidden="true"
-        className="rack-ear pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-9 border-l lg:block xl:w-10"
-      >
-        {EAR_SCREW_POSITIONS.map((position, index) => (
-          <ChassisScrew
-            key={`right-${position}`}
-            size="lg"
-            angle={index * 31 + 15}
-            className={`absolute left-1/2 -translate-x-1/2 ${position}`}
-          />
+      <div aria-hidden="true" className={`${EAR_BASE_CLASSES} right-0 border-l`}>
+        {EAR_SCREW_ANGLES_RIGHT.map((angle) => (
+          <ChassisScrew key={`right-${angle}`} size="lg" angle={angle} />
         ))}
       </div>
 

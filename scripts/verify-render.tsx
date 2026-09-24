@@ -10,6 +10,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { JSDOM } from 'jsdom';
 import { createElement } from 'react';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -101,6 +102,11 @@ function countOccurrences(haystack: string, needle: string): number {
     index = haystack.indexOf(needle, index + needle.length);
   }
   return count;
+}
+
+/** Parses rendered markup so structural assertions do not depend on class order. */
+function parseHtml(html: string): Document {
+  return new JSDOM(`<!doctype html><html><body>${html}</body></html>`).window.document;
 }
 
 /** Renders to static markup, failing the gate on any React warning. */
@@ -680,16 +686,81 @@ const chassisHtml = render(
   }),
 );
 check('chassis renders its slots', ['CHASSIS HEADER', 'STATUS RAIL', 'CONSOLE BAR', 'MOBILE NAV', 'BOTTOM BAR', 'CHASSIS CONTENT'].every((token) => chassisHtml.includes(token)));
-check('rack ears are hidden below lg', chassisHtml.includes('hidden w-9 border-r lg:block'));
 check('corner screws are hidden below md', chassisHtml.includes('absolute inset-0 hidden md:block'));
 check('bottom bar is mobile-only', chassisHtml.includes('fixed inset-x-0 bottom-0 z-40 md:hidden'));
 check(
   'root reserves the safe-area bottom padding',
   chassisHtml.includes('pb-[calc(env(safe-area-inset-bottom)_+_5rem)]'),
 );
-// Eight ear screws plus the four corner screws in the header panel.
-equal('each ear carries four screws', countOccurrences(chassisHtml, 'left-1/2 -translate-x-1/2 top-['), 8);
-equal('the header carries four corner screws', countOccurrences(chassisHtml, 'hex-screw relative'), 12);
+
+// Rack-ear structure is asserted against the parsed DOM: four screws per ear,
+// laid out by flex distribution rather than by percentage offsets.
+const chassisDocument = parseHtml(chassisHtml);
+const rackEars = Array.from(chassisDocument.querySelectorAll('.rack-ear'));
+const earScrews = rackEars.map((ear) => Array.from(ear.querySelectorAll('.hex-screw')));
+const hasEveryClass = (element: Element, classes: readonly string[]): boolean =>
+  classes.every((name) => element.classList.contains(name));
+
+equal('the chassis renders two rack ears', rackEars.length, 2);
+check(
+  'each rack ear carries exactly four screws',
+  earScrews.length === 2 && earScrews.every((screws) => screws.length === 4),
+);
+check(
+  'the screws are direct children of the ear',
+  rackEars.every((ear, index) =>
+    earScrews[index].every((screw) => screw.parentElement === ear),
+  ),
+);
+check(
+  'the ear distributes its screws with flexbox',
+  rackEars.every((ear) =>
+    hasEveryClass(ear, ['flex-col', 'items-center', 'justify-between', 'py-6']),
+  ),
+);
+check(
+  'the screws are no longer positioned by percentage offsets',
+  earScrews.every((screws) =>
+    screws.every((screw) => !screw.classList.contains('absolute') && screw.className.includes('shrink-0')),
+  ),
+);
+check(
+  'the ears stay hidden below lg and visible from lg up',
+  rackEars.every((ear) => hasEveryClass(ear, ['hidden', 'lg:flex'])),
+);
+check(
+  'the ears keep their width scale',
+  rackEars.every((ear) => hasEveryClass(ear, ['w-9', 'xl:w-10'])),
+);
+check(
+  'the ears stay decorative',
+  rackEars.every((ear) =>
+    ear.getAttribute('aria-hidden') === 'true' && ear.classList.contains('pointer-events-none'),
+  ),
+);
+check(
+  'the left ear keeps its edge and border',
+  hasEveryClass(rackEars[0], ['left-0', 'inset-y-0', 'border-r', 'z-10']),
+);
+check(
+  'the right ear keeps its edge and border',
+  hasEveryClass(rackEars[1], ['right-0', 'inset-y-0', 'border-l', 'z-10']),
+);
+equal(
+  'the header still carries four corner screws',
+  chassisDocument.querySelectorAll('.chassis-panel .hex-screw').length,
+  4,
+);
+equal(
+  'the chassis renders twelve screws in total',
+  chassisDocument.querySelectorAll('.hex-screw').length,
+  12,
+);
+equal(
+  'the chassis markup introduces no ids to duplicate',
+  chassisDocument.querySelectorAll('[id]').length,
+  0,
+);
 
 section('MobileNavPanel');
 const navHtml = render(
