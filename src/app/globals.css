@@ -1,21 +1,346 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   Tailwind v4 CSS-first configuration.
+   No tailwind.config.js exists — every design token lives here in @theme so
+   Tailwind can emit the matching utilities (bg-*, text-*, border-*, shadow-*,
+   rounded-*, font-*, animate-*).
+   ========================================================================== */
+
 @theme {
+  /* Chassis surfaces */
   --color-chassis-bg: #0b0d10;
   --color-chassis-surface: #14171d;
-  --color-chassis-border: #232731;
   --color-chassis-raised: #1c2028;
+  --color-chassis-sunken: #0e1015;
+  --color-chassis-border: #232731;
+  --color-chassis-border-strong: #313846;
+
+  /* Anodized metal */
   --color-hardware-metal: #282e3a;
+  --color-hardware-metal-hi: #3a4252;
+  --color-hardware-metal-lo: #171a21;
+
+  /* Typography */
+  --color-ink: #e2e8f0;
+  --color-ink-muted: #94a3b8;
+  --color-ink-dim: #64748b;
+  --color-ink-faint: #475569;
+
+  /* Status */
+  --color-status-ok: #00ff66;
+  --color-status-warn: #ffb703;
+  --color-status-error: #ff0055;
+
+  /* Fonts */
+  --font-hardware: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* Radii */
+  --radius-chassis: 0.75rem;
+  --radius-panel: 0.5rem;
+  --radius-control: 0.375rem;
+
+  /* Bevels and depth */
+  --shadow-bevel-raised: inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.65), 0 2px 4px rgba(0, 0, 0, 0.6);
+  --shadow-bevel-sunken: inset 0 2px 5px rgba(0, 0, 0, 0.75),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-control-raised: inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 2px 3px rgba(0, 0, 0, 0.55);
+  --shadow-control-pressed: inset 0 2px 4px rgba(0, 0, 0, 0.7);
+  --shadow-rack: 0 24px 60px -20px rgba(0, 0, 0, 0.9);
+
+  /* Motion */
+  --animate-led-pulse: led-pulse 1.6s ease-in-out infinite;
+  --animate-pad-flash: pad-flash 240ms ease-out;
+  --animate-sheet-in: sheet-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-playhead-pulse: playhead-pulse 320ms ease-out;
 }
 
-:root {
-  color-scheme: dark;
+@keyframes led-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
-body {
-  background-color: var(--color-chassis-bg);
-  color: #e2e8f0;
-  overscroll-behavior: none;
-  touch-action: manipulation;
-  -webkit-touch-callout: none;
+@keyframes pad-flash {
+  0% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes sheet-in {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes playhead-pulse {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.72;
+  }
+}
+
+/* ==========================================================================
+   Base layer — document level hardware shell behaviour.
+   ========================================================================== */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+    background-color: var(--color-chassis-bg);
+  }
+
+  html,
+  body {
+    /* Block rubber-band scrolling and double-tap zoom on iOS. */
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  body {
+    background-color: var(--color-chassis-bg);
+    color: var(--color-ink);
+    font-family: var(--font-hardware);
+    -webkit-font-smoothing: antialiased;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Interactive hardware never selects text or shows a callout. */
+  button,
+  [role="button"],
+  [role="slider"],
+  [role="switch"] {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-status-ok);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ==========================================================================
+   Components layer — reusable hardware surface treatments.
+   Every class is a static literal so nothing depends on runtime interpolation.
+   ========================================================================== */
+
+@layer components {
+  /* Brushed anodized aluminium panel with a raised bevel. */
+  .chassis-panel {
+    background-color: var(--color-chassis-surface);
+    background-image: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.045) 0%,
+      rgba(255, 255, 255, 0) 42%,
+      rgba(0, 0, 0, 0.28) 100%
+    );
+    border: 1px solid var(--color-chassis-border);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-bevel-raised);
+  }
+
+  /* Recessed bay: pattern memory, step wells, display windows. */
+  .chassis-sunken {
+    background-color: var(--color-chassis-sunken);
+    border: 1px solid var(--color-chassis-border);
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-bevel-sunken);
+  }
+
+  /* Fine horizontal brushing used by the rack ears. */
+  .brushed-metal {
+    background-color: var(--color-hardware-metal);
+    background-image: repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.035) 0px,
+      rgba(255, 255, 255, 0.035) 1px,
+      rgba(0, 0, 0, 0.06) 1px,
+      rgba(0, 0, 0, 0.06) 3px
+    );
+  }
+
+  /* Vertical rack ear with mounting holes. */
+  .rack-ear {
+    background-color: var(--color-hardware-metal);
+    background-image: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.06) 0%,
+        rgba(255, 255, 255, 0) 30%,
+        rgba(0, 0, 0, 0.4) 100%
+      ),
+      repeating-linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.03) 0px,
+        rgba(255, 255, 255, 0.03) 1px,
+        rgba(0, 0, 0, 0.05) 1px,
+        rgba(0, 0, 0, 0.05) 3px
+      );
+    border-color: var(--color-chassis-border-strong);
+    box-shadow: var(--shadow-bevel-raised);
+  }
+
+  /* Cross-head mounting screw. */
+  .hex-screw {
+    background-image: radial-gradient(
+        circle at 35% 30%,
+        var(--color-hardware-metal-hi) 0%,
+        var(--color-hardware-metal) 55%,
+        var(--color-hardware-metal-lo) 100%
+      );
+    border: 1px solid rgba(0, 0, 0, 0.7);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 1px 2px rgba(0, 0, 0, 0.7);
+  }
+
+  /* Screw slot: the visual line across the screw head. */
+  .hex-screw-slot {
+    background-image: linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.85) 0%,
+      rgba(0, 0, 0, 0.55) 50%,
+      rgba(0, 0, 0, 0.85) 100%
+    );
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+
+  /* Domed LED lens with a specular highlight. */
+  .led-lens {
+    background-image: radial-gradient(
+      circle at 34% 28%,
+      rgba(255, 255, 255, 0.55) 0%,
+      rgba(255, 255, 255, 0.08) 38%,
+      rgba(0, 0, 0, 0.28) 100%
+    );
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.55);
+  }
+
+  /* Rotary knob cap: knurled edge and centre indicator. */
+  .knob-cap {
+    background-image: radial-gradient(
+        circle at 38% 26%,
+        var(--color-hardware-metal-hi) 0%,
+        var(--color-hardware-metal) 48%,
+        var(--color-hardware-metal-lo) 100%
+      );
+    border: 1px solid rgba(0, 0, 0, 0.75);
+    box-shadow: var(--shadow-control-raised);
+  }
+
+  .knob-cap:active {
+    box-shadow: var(--shadow-control-pressed);
+  }
+
+  /* Indicator line etched into the knob face. */
+  .knob-indicator {
+    background-image: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.92) 0%,
+      rgba(255, 255, 255, 0.45) 100%
+    );
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.35);
+  }
+
+  /* Rubberised pad face used by step cells and soundboard pads. */
+  .pad-face {
+    background-image: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0) 40%,
+      rgba(0, 0, 0, 0.35) 100%
+    );
+    box-shadow: var(--shadow-control-raised);
+  }
+
+  /* Backlit LCD / seven-segment window. */
+  .seven-seg-window {
+    background-color: #05070a;
+    background-image: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(0, 0, 0, 0.55) 100%
+    );
+    border: 1px solid var(--color-chassis-border);
+    box-shadow: var(--shadow-bevel-sunken);
+  }
+
+  /* Unlit seven-segment ghost characters behind the live readout. */
+  .seven-seg-ghost {
+    color: rgba(255, 255, 255, 0.07);
+  }
+
+  /* Small engraved label plate. */
+  .engraved-label {
+    color: var(--color-ink-dim);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  /* Horizontal scroll region with no visible scrollbar (tablet matrix). */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Thin industrial scrollbar for desktop overflow rails. */
+  .industrial-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-hardware-metal-hi) transparent;
+  }
+
+  .industrial-scrollbar::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  .industrial-scrollbar::-webkit-scrollbar-track {
+    background-color: var(--color-chassis-sunken);
+  }
+
+  .industrial-scrollbar::-webkit-scrollbar-thumb {
+    background-color: var(--color-hardware-metal-hi);
+    border-radius: 4px;
+  }
+
+  /* Mobile viewport-height helper that survives iOS Safari chrome. */
+  .h-viewport {
+    min-height: 100dvh;
+  }
 }
