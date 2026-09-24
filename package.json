@@ -11,7 +11,8 @@
     "verify:defaults": "tsx scripts/verify-defaults.ts",
     "verify:store": "tsx scripts/verify-store.ts",
     "verify:render": "tsx scripts/verify-render.tsx",
-    "verify": "pnpm run typecheck && pnpm run verify:defaults && pnpm run verify:store && pnpm run verify:render"
+    "verify:engine": "tsx scripts/verify-engine.ts",
+    "verify": "pnpm run typecheck && pnpm run verify:defaults && pnpm run verify:store && pnpm run verify:render && pnpm run verify:engine"
   },
   "dependencies": {
     "next": "latest",

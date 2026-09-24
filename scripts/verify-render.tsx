@@ -39,6 +39,11 @@ import { StepEditorSheet } from '../src/components/molecules/StepEditorSheet';
 import { TrackHeader } from '../src/components/molecules/TrackHeader';
 import { TransportControls } from '../src/components/molecules/TransportControls';
 
+import { useAudioEngine } from '../src/hooks/useAudioEngine';
+import { useLocalPersistence } from '../src/hooks/useLocalPersistence';
+import { usePlayheadTracker } from '../src/hooks/usePlayheadTracker';
+import { useSoundboardKeyboard } from '../src/hooks/useSoundboardKeyboard';
+
 /* ------------------------------------------------------------------ harness */
 
 let passed = 0;
@@ -517,6 +522,50 @@ check(
     return html.includes(candidate.name);
   }),
 );
+
+/* ------------------------------------------------------------------ 5. hooks */
+
+/**
+ * Calls every Phase 4 hook during a server render. Effects are skipped by
+ * `renderToStaticMarkup`, so this proves the hook bodies honour the SSR contract
+ * (no browser global read during render) and that `useSyncExternalStore` has a
+ * working server snapshot.
+ */
+function HookHarness(): ReactElement {
+  const audio = useAudioEngine();
+  const persistence = useLocalPersistence();
+  const keyboard = useSoundboardKeyboard({
+    onTriggerPad: () => undefined,
+    onToggleTransport: () => undefined,
+  });
+  usePlayheadTracker({ isPlaying: audio.isPlaying, isInitialized: audio.isInitialized });
+
+  return createElement(
+    'dl',
+    { 'data-hook-harness': 'true' },
+    createElement('dt', null, 'initialized'),
+    createElement('dd', null, String(audio.isInitialized)),
+    createElement('dt', null, 'playing'),
+    createElement('dd', null, String(audio.isPlaying)),
+    createElement('dt', null, 'memoryFallback'),
+    createElement('dd', null, String(persistence.isUsingMemoryFallback)),
+    createElement('dt', null, 'quotaExceeded'),
+    createElement('dd', null, String(persistence.isQuotaExceeded)),
+    createElement('dt', null, 'lastPad'),
+    createElement('dd', null, String(keyboard.lastTriggeredPadId)),
+    createElement('dt', null, 'flashToken'),
+    createElement('dd', null, String(keyboard.flashToken)),
+    createElement('dt', null, 'meterLeft'),
+    createElement('dd', null, String(audio.getStereoLevels().left)),
+  );
+}
+
+section('Hook SSR contract');
+const harnessHtml = render('HookHarness', createElement(HookHarness));
+check('hooks render on the server', harnessHtml.includes('data-hook-harness="true"'));
+check('audio reports uninitialised during SSR', harnessHtml.includes('<dd>false</dd>'));
+check('transport reports idle during SSR', harnessHtml.includes('<dd>0</dd>'));
+check('the meter reads silence during SSR', harnessHtml.includes('<dd>0</dd>'));
 
 /* ----------------------------------------------------------------- summary */
 

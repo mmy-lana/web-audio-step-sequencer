@@ -108,6 +108,7 @@ export interface SequencerStoreState {
   duplicateSlotAction: (toSlot: number) => boolean;
   importPatternAction: (rawJson: string, fileSize?: number) => boolean;
   setRemoteChangeAvailable: (available: boolean) => void;
+  reportStorageError: (message: string) => void;
   clearStorageError: () => void;
 }
 
@@ -497,6 +498,10 @@ export const useSequencerStore = create<SequencerStoreState>()((set, get) => ({
     set({ remoteChangeAvailable: available });
   },
 
+  reportStorageError: (message: string): void => {
+    set({ storageError: message, ...storageFlags() });
+  },
+
   clearStorageError: (): void => {
     set({ storageError: null });
   },
@@ -508,16 +513,11 @@ export function selectAnySoloed(state: SequencerStoreState): boolean {
 }
 
 /**
- * Audibility rule shared by the UI and the scheduler: solo wins over mute, and
- * any soloed track silences every track that is not soloed.
+ * Audibility rule shared by the UI and the scheduler. Defined in the audio tier
+ * (it is evaluated at schedule time) and re-exported here so UI consumers have a
+ * single import site.
  */
-export function isTrackAudible(tracks: readonly Track[], trackIndex: number): boolean {
-  const track = tracks[trackIndex];
-  if (!track) return false;
-  const anySoloed = tracks.some((candidate) => candidate.soloed);
-  if (anySoloed) return track.soloed && !track.muted;
-  return !track.muted;
-}
+export { isTrackAudible } from '@/lib/audio/AudioEngine';
 
 /** Bounds-checked step read used by molecules and the step editor. */
 export function getStep(pattern: Pattern, trackIndex: number, stepIndex: number): Step | null {
