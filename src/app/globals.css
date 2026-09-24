@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --color-chassis-bg: #0b0d10;
+  --color-chassis-surface: #14171d;
+  --color-chassis-border: #232731;
+  --color-chassis-raised: #1c2028;
+  --color-hardware-metal: #282e3a;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-chassis-bg);
+  color: #e2e8f0;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
