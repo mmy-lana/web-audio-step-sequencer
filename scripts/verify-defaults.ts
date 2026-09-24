@@ -569,13 +569,24 @@ check('loadPatternFromSlot returns the pattern', loadedSlot.ok && loadedSlot.dat
 equal('slot save rewrites the slot field', loadedSlot.data?.slot, 2);
 check('slot save refreshes updatedAt', (loadedSlot.data?.updatedAt ?? 0) >= DETERMINISTIC_TIMESTAMP);
 check('invalid slot index is rejected on save', !savePatternToSlot(12, base).ok);
+equal('an invalid save reports its reason', savePatternToSlot(12, base).code, 'invalid_slot');
 check('invalid slot index is rejected on load', !loadPatternFromSlot(0).ok);
+equal('an invalid load reports its reason', loadPatternFromSlot(0).code, 'invalid_slot');
 check('empty slot reports an error', !loadPatternFromSlot(7).ok);
+// An untouched slot is a distinguishable state, not corruption.
+equal('an empty slot reports the empty reason', loadPatternFromSlot(7).code, 'empty');
+equal('an empty slot reports the empty message', loadPatternFromSlot(7).error, 'Slot 7 is empty');
 
 const slot5Payload = JSON.stringify({ ...base, slot: 5 });
 safeStorage.setItem(getSlotStorageKey(4), slot5Payload);
 check('slot mismatch is detected', !loadPatternFromSlot(4).ok);
+equal('a slot mismatch reports corruption', loadPatternFromSlot(4).code, 'corrupt');
 safeStorage.setItem(getSlotStorageKey(6), 'not-json');
+check('unparseable slot data is rejected', !loadPatternFromSlot(6).ok);
+equal('unparseable slot data reports corruption', loadPatternFromSlot(6).code, 'corrupt');
+safeStorage.setItem(getSlotStorageKey(8), JSON.stringify({ ...base, slot: 8, bpm: 1 }));
+equal('schema-invalid slot data reports corruption', loadPatternFromSlot(8).code, 'corrupt');
+clearPatternSlot(8);
 const metadata = getSlotMetadataList();
 equal('metadata covers every slot', metadata.length, PATTERN_SLOT_COUNT);
 check('metadata flags the corrupt slot', metadata[5].isCorrupt);

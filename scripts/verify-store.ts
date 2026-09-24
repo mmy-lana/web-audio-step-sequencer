@@ -17,14 +17,15 @@ import {
   useSequencerStore,
 } from '../src/store/useSequencerStore';
 import type { SequencerStoreState } from '../src/store/useSequencerStore';
-import { createDefaultPattern, TRACK_COUNT } from '../src/lib/constants/defaultPatterns';
-import { STORAGE_KEYS } from '../src/lib/constants/storageKeys';
+import { createDefaultPattern, DEFAULT_STEP_COUNT, TRACK_COUNT } from '../src/lib/constants/defaultPatterns';
+import { STORAGE_KEYS, getSlotStorageKey } from '../src/lib/constants/storageKeys';
 import {
   clearWorkingCopy,
   exportPatternToJson,
   loadPatternFromSlot,
   safeStorage,
 } from '../src/lib/storage/patternStorage';
+import { PatternSchema } from '../src/lib/validation/pattern';
 import {
   clearPlayhead,
   getActiveStep,
@@ -344,11 +345,14 @@ equal('a conflicting load keeps the working copy', state().pattern.bpm, 101);
 equal('forced load discards local edits', state().loadSlotAction(2, true), 'loaded');
 equal('forced load restores the saved tempo', state().pattern.bpm, 120);
 equal('forced load clears the dirty flag', state().isDirty, false);
-equal('loading an empty slot errors', state().loadSlotAction(7), 'error');
-check('the load error surfaces in state', state().storageError !== null);
 state().clearStorageError();
 equal('storage error can be dismissed', state().storageError, null);
-equal('an out-of-range slot errors', state().saveSlotAction(99), 'error');
+equal('an out-of-range slot save errors', state().saveSlotAction(99), 'error');
+equal('an out-of-range slot load errors', state().loadSlotAction(99), 'error');
+check('the invalid slot surfaces an error', state().storageError !== null);
+equal('a fractional slot load errors', state().loadSlotAction(2.5), 'error');
+equal('a negative slot load errors', state().loadSlotAction(-1), 'error');
+state().clearStorageError();
 
 check('duplicate copies the active slot', state().duplicateSlotAction(5));
 const duplicated = state().slotMetadata.find((entry) => entry.slot === 5);
@@ -361,6 +365,105 @@ check('clear empties the slot', cleared !== undefined && cleared.isEmpty);
 state().setBpm(90);
 state().clearSlotAction(state().activeSlot);
 check('clearing the active slot marks the pattern dirty', state().isDirty);
+
+/* ------------------------------------------------- 6a. empty slot handling */
+
+section('Empty slot initialization');
+resetStorage();
+resetStore();
+state().hydrateFromStorage();
+
+check(
+  'a clean storage reset leaves all eight slots empty',
+  state().slotMetadata.length === 8 &&
+    state().slotMetadata.every((entry) => entry.isEmpty && !entry.isCorrupt),
+);
+equal('slot 2 is saved for comparison', state().saveSlotAction(2), 'saved');
+equal('the working copy is clean', state().isDirty, false);
+const savedSlotTwoName = state().slotMetadata.find((entry) => entry.slot === 2)?.name;
+
+equal('selecting an empty slot creates a working copy', state().loadSlotAction(7), 'created');
+equal('an empty slot raises no storage error', state().storageError, null);
+equal('the created pattern adopts the requested slot', state().pattern.slot, 7);
+equal('the created pattern id is slot-specific', state().pattern.id, createDefaultPattern(7).id);
+equal('the active slot follows the created pattern', state().activeSlot, 7);
+check('the created pattern satisfies the schema', PatternSchema.safeParse(state().pattern).success);
+equal('the created pattern keeps the default step count', state().pattern.stepCount, DEFAULT_STEP_COUNT);
+equal('the created pattern carries every track', state().pattern.tracks.length, TRACK_COUNT);
+check(
+  'every created track holds a contiguous full step grid',
+  state().pattern.tracks.every(
+    (track) =>
+      track.steps.length === DEFAULT_STEP_COUNT &&
+      track.steps.every((step, index) => step.index === index),
+  ),
+);
+check('the created pattern is a new unsaved working copy', state().isDirty);
+state().setBpm(111);
+equal('editing the new pattern is allowed', state().pattern.bpm, 111);
+check(
+  'the slot stays empty until it is saved',
+  state().slotMetadata.find((entry) => entry.slot === 7)?.isEmpty === true,
+);
+equal(
+  'no other slot was overwritten',
+  state().slotMetadata.find((entry) => entry.slot === 2)?.name,
+  savedSlotTwoName,
+);
+equal('a saved slot still loads after the empty selection', state().loadSlotAction(2, true), 'loaded');
+equal('the loaded slot keeps its tempo', state().pattern.bpm, 120);
+
+equal('re-selecting the new slot is offered again', state().loadSlotAction(7, true), 'created');
+equal('re-selecting restores the fresh default tempo', state().pattern.bpm, 120);
+state().setBpm(111);
+equal('saving the new pattern into the empty slot succeeds', state().saveSlotAction(7), 'saved');
+equal('saving clears the dirty flag', state().isDirty, false);
+check(
+  'the slot is now occupied',
+  state().slotMetadata.find((entry) => entry.slot === 7)?.isEmpty === false,
+);
+equal('the populated slot reports its stored name', state().slotMetadata.find((entry) => entry.slot === 7)?.name, 'FACTORY PATTERN 7');
+equal('the saved slot reloads with the edit', state().loadSlotAction(7, true), 'loaded');
+equal('the reloaded slot keeps the edited tempo', state().pattern.bpm, 111);
+equal('re-saving the populated slot asks first', state().saveSlotAction(7), 'needs_confirm');
+
+section('Corrupt and invalid slots still fail');
+const workingSlotBeforeCorruption = state().pattern.slot;
+// A slot holding unparseable data is corruption, not an empty slot.
+safeStorage.setItem(getSlotStorageKey(6), '{"broken":');
+equal('a corrupt slot reports an error', state().loadSlotAction(6, true), 'error');
+check('corruption surfaces a storage error', (state().storageError ?? '').length > 0);
+state().refreshSlotMetadata();
+check(
+  'corruption is flagged, never reported as empty',
+  state().slotMetadata.find((entry) => entry.slot === 6)?.isCorrupt === true &&
+    state().slotMetadata.find((entry) => entry.slot === 6)?.isEmpty === false,
+);
+state().clearStorageError();
+
+// Valid JSON that fails the schema is corruption too.
+safeStorage.setItem(getSlotStorageKey(5), JSON.stringify({ bpm: 1 }));
+equal('a schema-invalid slot reports an error', state().loadSlotAction(5, true), 'error');
+check('schema corruption surfaces an error', state().storageError !== null);
+state().clearStorageError();
+
+// Valid pattern data stored under the wrong key is a slot mismatch.
+safeStorage.setItem(getSlotStorageKey(4), JSON.stringify(createDefaultPattern(3)));
+equal('a slot mismatch reports an error', state().loadSlotAction(4, true), 'error');
+check(
+  'the mismatch error names the corruption',
+  (state().storageError ?? '').includes('mismatch'),
+  state().storageError ?? '',
+);
+state().clearStorageError();
+
+// A corrupt slot must never be silently initialized the way an empty one is.
+equal('a corrupt load never becomes the active slot', state().activeSlot, workingSlotBeforeCorruption);
+check(
+  'a corrupt load never creates a working pattern for that slot',
+  state().pattern.slot === workingSlotBeforeCorruption,
+);
+resetStorage();
 
 /* ------------------------------------------- 6b. dirty slot load (no dialog) */
 

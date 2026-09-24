@@ -150,6 +150,38 @@ function captureConsole(): { messages: string[]; restore: () => void } {
   };
 }
 
+/** Minimal PointerEvent surface needed to tap a step cell inside jsdom. */
+interface PointerEventInitLike {
+  bubbles?: boolean;
+  cancelable?: boolean;
+  pointerId?: number;
+  clientX?: number;
+  clientY?: number;
+  isPrimary?: boolean;
+}
+
+type PointerEventConstructor = new (type: string, init?: PointerEventInitLike) => Event;
+
+/**
+ * Taps an element with a matching pointerdown / pointerup pair. Step cells act
+ * on pointer release rather than on `click`, so a synthetic click would be
+ * ignored by a correct implementation.
+ */
+function tapElement(element: Element, window: JSDOM['window']): void {
+  const PointerEventCtor = (window as unknown as { PointerEvent: PointerEventConstructor })
+    .PointerEvent;
+  const init: PointerEventInitLike = {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 1,
+    clientX: 8,
+    clientY: 8,
+    isPrimary: true,
+  };
+  element.dispatchEvent(new PointerEventCtor('pointerdown', init));
+  element.dispatchEvent(new PointerEventCtor('pointerup', init));
+}
+
 const HYDRATION_MARKERS = [
   'Hydration failed',
   'did not match',
@@ -553,6 +585,90 @@ async function main(): Promise<void> {
     0,
   );
   equal('confirming opens no native dialog', nativeDialogCalls, 0);
+
+  /* ------------------------------------------------- graceful empty slots */
+  section('Empty slot selection in the UI');
+  await act(async () => {
+    // Land on a clean working copy so the empty slot loads without a conflict.
+    useSequencerStore.getState().loadSlotAction(2, true);
+  });
+  check(
+    'slot 7 starts empty',
+    useSequencerStore.getState().slotMetadata.find((entry) => entry.slot === 7)?.isEmpty === true,
+  );
+
+  const emptySlotButtons = findButtons('Load slot 7');
+  check('the empty slot button is rendered', emptySlotButtons.length > 0);
+  check('the empty slot button is announced as empty', (emptySlotButtons[0]?.getAttribute('aria-label') ?? '').includes('empty'));
+
+  const captureEmptyClick = captureConsole();
+  await act(async () => {
+    emptySlotButtons[0]?.click();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+  });
+  const emptyClickMessages = captureEmptyClick.messages;
+  captureEmptyClick.restore();
+
+  const emptyState = useSequencerStore.getState();
+  equal('selecting an empty slot raises no storage error', emptyState.storageError, null);
+  equal('selecting an empty slot adopts the slot', emptyState.pattern.slot, 7);
+  equal('selecting an empty slot moves the active slot', emptyState.activeSlot, 7);
+  check('the new working copy is unsaved', emptyState.isDirty);
+  check(
+    'selecting an empty slot emits no React warnings',
+    emptyClickMessages.length === 0,
+    emptyClickMessages.slice(0, 2).join(' | '),
+  );
+  check(
+    'no red storage banner is rendered',
+    dom.window.document.body.textContent?.includes('Slot 7 is empty') !== true,
+  );
+  check(
+    'the empty slot is still offered as empty',
+    (findButtons('Load slot 7')[0]?.getAttribute('aria-label') ?? '').includes('empty'),
+  );
+  check(
+    'the save action is offered for the empty slot',
+    findButtons('Save pattern to slot 7').length > 0,
+  );
+
+  // The new pattern must be editable straight away.
+  const firstStepCell = dom.window.document.querySelector('[data-step-index="0"]');
+  check('the step grid is still rendered', firstStepCell !== null);
+  const stepActiveBefore = useSequencerStore.getState().pattern.tracks[0].steps[0].active;
+  await act(async () => {
+    // Step cells respond to a pointer tap, mirroring the hardware feel.
+    if (firstStepCell !== null) tapElement(firstStepCell, dom.window);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  });
+  equal(
+    'the new pattern is editable from the grid',
+    useSequencerStore.getState().pattern.tracks[0].steps[0].active,
+    !stepActiveBefore,
+  );
+
+  const captureEmptySave = captureConsole();
+  await act(async () => {
+    findButtons('Save pattern to slot 7')[0]?.click();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+  });
+  const emptySaveMessages = captureEmptySave.messages;
+  captureEmptySave.restore();
+
+  const savedState = useSequencerStore.getState();
+  equal('saving into the empty slot succeeds', savedState.storageError, null);
+  check('saving clears the dirty flag', !savedState.isDirty);
+  check(
+    'the slot is occupied after the save',
+    savedState.slotMetadata.find((entry) => entry.slot === 7)?.isEmpty === false,
+  );
+  check('the empty-slot flow emits no console noise', emptySaveMessages.length === 0, emptySaveMessages.slice(0, 2).join(' | '));
 
   section('Shared element descriptor probe');
   // Settles whether reusing one element object at two tree positions is itself

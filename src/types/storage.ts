@@ -12,11 +12,19 @@ export interface StorageSlotMetadata {
   isCorrupt: boolean;
 }
 
+/**
+ * Machine-readable failure reason. Callers branch on this instead of parsing
+ * message text, so `empty` (a normal, untouched slot) stays clearly distinct
+ * from `corrupt` (unreadable or schema-invalid stored data).
+ */
+export type StorageFailureCode = 'invalid_slot' | 'empty' | 'corrupt' | 'validation';
+
 /** Result wrapper used by every storage operation. */
 export interface StorageResult<T> {
   ok: boolean;
   data?: T;
   error?: string;
+  code?: StorageFailureCode;
   isMemoryFallback?: boolean;
   isQuotaExceeded?: boolean;
 }

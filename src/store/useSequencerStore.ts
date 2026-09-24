@@ -50,6 +50,18 @@ import {
 export type MobileTab = 'sequencer' | 'soundboard' | 'fx';
 export type StepPage = 0 | 1;
 
+/**
+ * Outcome of a slot switch.
+ *
+ * - `loaded`: stored pattern read into the working copy.
+ * - `created`: the slot is empty, so the working copy became a fresh unsaved
+ *   factory pattern for that slot. The slot itself stays empty until saved.
+ * - `dirty_conflict`: the working copy has unsaved edits and the caller must
+ *   confirm before the load can be forced.
+ * - `error`: out-of-range slot, corrupt data, slot mismatch or a storage failure.
+ */
+export type SlotLoadOutcome = 'loaded' | 'created' | 'dirty_conflict' | 'error';
+
 export interface EditingStepRef {
   trackIndex: number;
   stepIndex: number;
@@ -102,7 +114,7 @@ export interface SequencerStoreState {
   setStepPage: (page: StepPage) => void;
   setEditingStep: (step: EditingStepRef | null) => void;
   refreshSlotMetadata: () => void;
-  loadSlotAction: (slot: number, force?: boolean) => 'loaded' | 'dirty_conflict' | 'error';
+  loadSlotAction: (slot: number, force?: boolean) => SlotLoadOutcome;
   saveSlotAction: (slot: number, confirmOverwrite?: boolean) => 'saved' | 'needs_confirm' | 'error';
   clearSlotAction: (slot: number) => void;
   duplicateSlotAction: (toSlot: number) => boolean;
@@ -413,7 +425,7 @@ export const useSequencerStore = create<SequencerStoreState>()((set, get) => ({
     set({ slotMetadata: getSlotMetadataList(), ...storageFlags() });
   },
 
-  loadSlotAction: (slot: number, force = false): 'loaded' | 'dirty_conflict' | 'error' => {
+  loadSlotAction: (slot: number, force = false): SlotLoadOutcome => {
     if (!isValidPatternSlot(slot)) {
       set({ storageError: `Slot ${slot} is outside the 1..${PATTERN_SLOT_COUNT} range` });
       return 'error';
@@ -423,6 +435,23 @@ export const useSequencerStore = create<SequencerStoreState>()((set, get) => ({
     }
     const result = loadPatternFromSlot(slot);
     if (!result.ok || !result.data) {
+      // An untouched slot is a normal pattern-memory operation, not a storage
+      // fault: it becomes a fresh working copy the user can edit and save. The
+      // slot stays empty until that save, and no other slot is touched.
+      if (result.code === 'empty') {
+        set({
+          pattern: createDefaultPattern(slot),
+          activeSlot: slot,
+          // Nothing is stored for this slot yet, so the copy is unsaved.
+          isDirty: true,
+          stepPage: 0,
+          editingStep: null,
+          storageError: null,
+          ...storageFlags(),
+        });
+        get().refreshSlotMetadata();
+        return 'created';
+      }
       set({ storageError: result.error ?? `Slot ${slot} could not be loaded` });
       return 'error';
     }

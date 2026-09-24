@@ -179,7 +179,11 @@ export function clearWorkingCopy(): void {
 
 export function savePatternToSlot(slot: number, pattern: Pattern): StorageResult<void> {
   if (!isValidPatternSlot(slot)) {
-    return { ok: false, error: `Slot index ${slot} is outside the valid 1..${PATTERN_SLOT_COUNT} range` };
+    return {
+      ok: false,
+      code: 'invalid_slot',
+      error: `Slot index ${slot} is outside the valid 1..${PATTERN_SLOT_COUNT} range`,
+    };
   }
   const targetPattern: Pattern = {
     ...pattern,
@@ -188,29 +192,46 @@ export function savePatternToSlot(slot: number, pattern: Pattern): StorageResult
   };
   const result = PatternSchema.safeParse(targetPattern);
   if (!result.success) {
-    return { ok: false, error: formatValidationIssues(result.error) };
+    return { ok: false, code: 'validation', error: formatValidationIssues(result.error) };
   }
   safeStorage.setItem(getSlotStorageKey(slot), JSON.stringify(result.data));
   return withDiagnostics();
 }
 
+/**
+ * Reads one memory slot.
+ *
+ * An untouched slot reports `code: 'empty'`, which is a normal state of a
+ * pattern-memory bank rather than a failure. Corrupt JSON, schema violations and
+ * slot mismatches report `code: 'corrupt'`, and out-of-range requests report
+ * `code: 'invalid_slot'`.
+ */
 export function loadPatternFromSlot(slot: number): StorageResult<Pattern> {
   if (!isValidPatternSlot(slot)) {
-    return { ok: false, error: `Slot index ${slot} is outside the valid 1..${PATTERN_SLOT_COUNT} range` };
+    return {
+      ok: false,
+      code: 'invalid_slot',
+      error: `Slot index ${slot} is outside the valid 1..${PATTERN_SLOT_COUNT} range`,
+    };
   }
   const raw = safeStorage.getItem(getSlotStorageKey(slot));
-  if (!raw) return { ok: false, error: `Slot ${slot} is empty` };
+  if (!raw) return { ok: false, code: 'empty', error: `Slot ${slot} is empty` };
   try {
     const pattern = validatePatternJson(raw);
     if (pattern.slot !== slot) {
       return {
         ok: false,
+        code: 'corrupt',
         error: `Data corruption: Slot mismatch (expected ${slot}, found ${pattern.slot})`,
       };
     }
     return { ok: true, data: pattern };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : `Failed to parse slot ${slot}` };
+    return {
+      ok: false,
+      code: 'corrupt',
+      error: err instanceof Error ? err.message : `Failed to parse slot ${slot}`,
+    };
   }
 }
 
