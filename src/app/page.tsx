@@ -1,260 +1,423 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import type { TrackColor } from '@/types/audio';
-import { TRACK_COLOR_ORDER } from '@/lib/constants/colorMap';
-import { MAX_BPM, MIN_BPM, TRACK_TEMPLATES } from '@/lib/constants/defaultPatterns';
-import { formatBpm, roundTo } from '@/lib/utils/audioMath';
+import type { SoundboardPad } from '@/types/audio';
+import { formatPercent } from '@/lib/utils/audioMath';
+import { TapTempoTracker } from '@/lib/utils/tapTempo';
+import { useSequencerStore } from '@/store/useSequencerStore';
+import { useAudioEngine } from '@/hooks/useAudioEngine';
+import { useLocalPersistence } from '@/hooks/useLocalPersistence';
+import { usePlayheadTracker } from '@/hooks/usePlayheadTracker';
+import { useSoundboardKeyboard } from '@/hooks/useSoundboardKeyboard';
 import { ChassisScrew } from '@/components/ui/ChassisScrew';
-import { KnobRotary } from '@/components/ui/KnobRotary';
 import { LedIndicator } from '@/components/ui/LedIndicator';
-import { LedVuMeter } from '@/components/ui/LedVuMeter';
-import { MechanicalSwitch } from '@/components/ui/MechanicalSwitch';
 import { PushButton } from '@/components/ui/PushButton';
 import { SevenSegmentDisplay } from '@/components/ui/SevenSegmentDisplay';
-
-const TRACK_LABELS = TRACK_TEMPLATES.map((template) => template.name);
+import { MasterFxPanel } from '@/components/molecules/MasterFxPanel';
+import { PatternManagerBar } from '@/components/molecules/PatternManagerBar';
+import { StereoVuMeter } from '@/components/molecules/StereoVuMeter';
+import { TransportControls } from '@/components/molecules/TransportControls';
+import { HardwareChassis } from '@/components/organisms/HardwareChassis';
+import { MobileNavPanel } from '@/components/organisms/MobileNavPanel';
+import { PowerOnOverlay } from '@/components/organisms/PowerOnOverlay';
+import { SequencerMatrix } from '@/components/organisms/SequencerMatrix';
+import { SoundboardMatrix } from '@/components/organisms/SoundboardMatrix';
 
 /**
- * Phase 2 primitive bench.
+ * Root screen.
  *
- * This screen exists only to prove every atomic hardware control renders and
- * wires up under the App Router build. Phase 5 replaces it with the integrated
- * sequencer shell. The VU ladders intentionally display live control state —
- * real analyser data arrives with the audio engine in Phase 4.
+ * Owns everything that must exist exactly once: storage hydration, the autosave
+ * hook, the engine bridge, the playhead tracker and the global hotkeys. The
+ * responsive layout itself is delegated to the chassis and the view organisms.
  */
-export default function PrimitiveBenchPage(): ReactElement {
-  const [isPowered, setIsPowered] = useState(false);
-  const [bpm, setBpm] = useState(120);
-  const [masterVolume, setMasterVolume] = useState(0.85);
-  const [cutoff, setCutoff] = useState(2400);
-  const [delayTime, setDelayTime] = useState(0.25);
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [muteStates, setMuteStates] = useState<boolean[]>(() =>
-    TRACK_LABELS.map(() => false),
+export default function HomePage(): ReactElement {
+  /* --------------------------------------------------------------- store */
+  const hasHydrated = useSequencerStore((state) => state.hasHydrated);
+  const hydrateFromStorage = useSequencerStore((state) => state.hydrateFromStorage);
+  const patternName = useSequencerStore((state) => state.pattern.name);
+  const bpm = useSequencerStore((state) => state.pattern.bpm);
+  const swing = useSequencerStore((state) => state.pattern.swing);
+  const stepCount = useSequencerStore((state) => state.pattern.stepCount);
+  const masterFx = useSequencerStore((state) => state.pattern.masterFx);
+  const activeSlot = useSequencerStore((state) => state.activeSlot);
+  const isDirty = useSequencerStore((state) => state.isDirty);
+  const isEditMode = useSequencerStore((state) => state.isEditMode);
+  const activeMobileTab = useSequencerStore((state) => state.activeMobileTab);
+  const stepPage = useSequencerStore((state) => state.stepPage);
+  const slotMetadata = useSequencerStore((state) => state.slotMetadata);
+  const storageError = useSequencerStore((state) => state.storageError);
+  const remoteChangeAvailable = useSequencerStore((state) => state.remoteChangeAvailable);
+
+  const setIsEditMode = useSequencerStore((state) => state.setIsEditMode);
+  const setBpm = useSequencerStore((state) => state.setBpm);
+  const setSwing = useSequencerStore((state) => state.setSwing);
+  const setStepCount = useSequencerStore((state) => state.setStepCount);
+  const setStepPage = useSequencerStore((state) => state.setStepPage);
+  const updateMasterFx = useSequencerStore((state) => state.updateMasterFx);
+  const setActiveMobileTab = useSequencerStore((state) => state.setActiveMobileTab);
+  const setRemoteChangeAvailable = useSequencerStore((state) => state.setRemoteChangeAvailable);
+  const clearStorageError = useSequencerStore((state) => state.clearStorageError);
+  const reportStorageError = useSequencerStore((state) => state.reportStorageError);
+  const loadSlotAction = useSequencerStore((state) => state.loadSlotAction);
+  const saveSlotAction = useSequencerStore((state) => state.saveSlotAction);
+  const clearSlotAction = useSequencerStore((state) => state.clearSlotAction);
+  const duplicateSlotAction = useSequencerStore((state) => state.duplicateSlotAction);
+  const importPatternAction = useSequencerStore((state) => state.importPatternAction);
+
+  /* --------------------------------------------------------------- hooks */
+  const { isInitialized, isPlaying, play, stop, initializeAudio, triggerSoundboardPad } =
+    useAudioEngine();
+  const persistence = useLocalPersistence();
+
+  usePlayheadTracker({ isPlaying, isInitialized });
+
+  const handleTriggerPad = useCallback(
+    (pad: SoundboardPad): void => {
+      triggerSoundboardPad(pad);
+    },
+    [triggerSoundboardPad],
   );
-  const [soloIndex, setSoloIndex] = useState<number | null>(null);
 
-  const toggleMute = useCallback((index: number): void => {
-    setMuteStates((previous) =>
-      previous.map((muted, position) => (position === index ? !muted : muted)),
-    );
+  const handleToggleTransport = useCallback((): void => {
+    if (isPlaying) {
+      stop();
+    } else {
+      void play();
+    }
+  }, [isPlaying, stop, play]);
+
+  const keyboard = useSoundboardKeyboard({
+    onTriggerPad: handleTriggerPad,
+    onToggleTransport: handleToggleTransport,
+    // Hotkeys stay inert until the instrument has been powered on.
+    enabled: isInitialized,
+  });
+
+  /* ----------------------------------------------------------- hydration */
+  useEffect(() => {
+    hydrateFromStorage();
+  }, [hydrateFromStorage]);
+
+  /* ----------------------------------------------------------- tap tempo */
+  const tapTrackerRef = useRef<TapTempoTracker | null>(null);
+  const [tapCount, setTapCount] = useState(0);
+
+  const handleTapTempo = useCallback((): void => {
+    const tracker = tapTrackerRef.current ?? new TapTempoTracker();
+    tapTrackerRef.current = tracker;
+    const result = tracker.registerTap();
+    setTapCount(result.tapCount);
+    if (result.bpm !== null) setBpm(result.bpm);
+  }, [setBpm]);
+
+  /* -------------------------------------------------------------- export */
+  const handleExport = useCallback((): void => {
+    const state = useSequencerStore.getState();
+    const json = JSON.stringify(state.pattern, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const slug = state.pattern.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    anchor.href = url;
+    anchor.download = `${slug}-slot-${state.activeSlot}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
   }, []);
 
-  const toggleSolo = useCallback((index: number): void => {
-    setSoloIndex((previous) => (previous === index ? null : index));
-  }, []);
+  const handleImport = useCallback(
+    (file: File): void => {
+      void file
+        .text()
+        .then((raw) => {
+          importPatternAction(raw, file.size);
+        })
+        .catch(() => {
+          reportStorageError(`"${file.name}" could not be read`);
+        });
+    },
+    [importPatternAction, reportStorageError],
+  );
 
-  const activeTrackCount = muteStates.filter((muted) => !muted).length;
-  const meterLevel = isPowered ? roundTo(masterVolume / 1.2, 3) : 0;
+  const handleSelectSlot = useCallback(
+    (slot: number): void => {
+      const outcome = loadSlotAction(slot);
+      if (outcome !== 'dirty_conflict') return;
+      const confirmed = window.confirm(
+        'The working copy has unsaved changes. Discard them and load the slot?',
+      );
+      if (confirmed) loadSlotAction(slot, true);
+    },
+    [loadSlotAction],
+  );
+
+  /* -------------------------------------------------------------- header */
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 className="font-hardware text-base font-bold tracking-[0.22em] text-ink sm:text-lg">
+          W-AUDIO // MODEL-16
+        </h1>
+        <p className="engraved-label font-hardware text-[9px]">
+          analog-style hardware sequencer &amp; soundboard
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <SevenSegmentDisplay
+          label="Pattern"
+          value={bpm}
+          digits={3}
+          size="sm"
+          isActive={isPlaying}
+          suffix="BPM"
+        />
+        <div className="flex items-center gap-2">
+          <LedIndicator
+            color={isInitialized ? (isPlaying ? 'emerald' : 'cyan') : 'crimson'}
+            isOn
+            size="md"
+            intensity={isPlaying ? 'high' : 'normal'}
+            label={isInitialized ? (isPlaying ? 'Running' : 'Ready') : 'Audio suspended'}
+          />
+          <span className="engraved-label font-hardware text-[9px]">
+            {isInitialized ? (isPlaying ? 'running' : 'ready') : 'power off'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <LedIndicator
+            color={isDirty ? 'amber' : 'emerald'}
+            isOn
+            size="sm"
+            label={isDirty ? 'Unsaved changes' : 'Saved'}
+          />
+          <span className="font-hardware text-[9px] text-ink-dim">slot {activeSlot}</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* --------------------------------------------------------- status rail */
+  const statusRail = (
+    <div className="flex flex-col gap-2">
+      {remoteChangeAvailable ? (
+        <div
+          role="status"
+          className="chassis-panel flex flex-wrap items-center justify-between gap-2 border-status-warn/50 bg-status-warn/10 p-2"
+        >
+          <span className="font-hardware text-[10px] text-status-warn">
+            Pattern modified in another tab. Reload to pick up the newer copy.
+          </span>
+          <div className="flex items-center gap-1">
+            <PushButton
+              label="Reload"
+              onClick={() => hydrateFromStorage()}
+              variant="primary"
+              size="sm"
+              className="min-h-[32px]!"
+            />
+            <PushButton
+              label="Dismiss"
+              onClick={() => setRemoteChangeAvailable(false)}
+              variant="ghost"
+              size="sm"
+              className="min-h-[32px]!"
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {persistence.isQuotaExceeded ? (
+        <p
+          role="alert"
+          className="chassis-panel border-status-error/50 bg-status-error/10 p-2 font-hardware text-[10px] text-status-error"
+        >
+          Browser storage is full. Edits are kept in memory only — export the pattern to keep your
+          work.
+        </p>
+      ) : null}
+
+      {!isInitialized ? (
+        <p className="chassis-panel p-2 font-hardware text-[10px] text-ink-dim">
+          Audio is suspended. Use the POWER ON switch to enable sound output.
+        </p>
+      ) : null}
+    </div>
+  );
+
+  /* ------------------------------------------------------------ transport */
+  const handleChangeMasterVolume = useCallback(
+    (volume: number): void => {
+      updateMasterFx({ masterVolume: volume });
+    },
+    [updateMasterFx],
+  );
+
+  const handleToggleEditMode = useCallback((): void => {
+    setIsEditMode(!isEditMode);
+  }, [setIsEditMode, isEditMode]);
+
+  const consoleTransport = (
+    <TransportControls
+      variant="console"
+      isPlaying={isPlaying}
+      bpm={bpm}
+      swing={swing}
+      masterVolume={masterFx.masterVolume}
+      onTogglePlay={handleToggleTransport}
+      onStop={stop}
+      onChangeBpm={setBpm}
+      onChangeSwing={setSwing}
+      onChangeMasterVolume={handleChangeMasterVolume}
+      onTapTempo={handleTapTempo}
+      stepCount={stepCount}
+      onChangeStepCount={setStepCount}
+      stepPage={stepPage}
+      onChangeStepPage={setStepPage}
+      isEditMode={isEditMode}
+      onToggleEditMode={handleToggleEditMode}
+      isPowered={isInitialized}
+      tapCount={tapCount}
+    />
+  );
+
+  const barTransport = (
+    <TransportControls
+      variant="bar"
+      isPlaying={isPlaying}
+      bpm={bpm}
+      onTogglePlay={handleToggleTransport}
+      onStop={stop}
+      onChangeBpm={setBpm}
+      onTapTempo={handleTapTempo}
+      isPowered={isInitialized}
+      tapCount={tapCount}
+    />
+  );
+
+  const patternManager = (
+    <PatternManagerBar
+      activeSlot={activeSlot}
+      isDirty={isDirty}
+      patternName={patternName}
+      slotMetadata={slotMetadata}
+      storageError={storageError}
+      onDismissError={clearStorageError}
+      isUsingMemoryFallback={persistence.isUsingMemoryFallback}
+      isQuotaExceeded={persistence.isQuotaExceeded}
+      onSelectSlot={handleSelectSlot}
+      onSaveToSlot={(slot) => {
+        // The bar already confirmed any overwrite against slot metadata.
+        saveSlotAction(slot, true);
+      }}
+      onClearSlot={clearSlotAction}
+      onDuplicateSlot={(slot) => {
+        duplicateSlotAction(slot);
+      }}
+      onExport={handleExport}
+      onImport={handleImport}
+    />
+  );
+
+  const masterSection = (
+    <div className="flex flex-col gap-3">
+      <MasterFxPanel fx={masterFx} onChangeFx={updateMasterFx} />
+      <div className="chassis-panel flex items-center justify-center gap-4 p-3">
+        <StereoVuMeter isInitialized={isInitialized} segments={12} />
+      </div>
+    </div>
+  );
 
   return (
-    <main className="h-viewport flex flex-col items-center bg-chassis-bg px-3 py-6 pb-[calc(env(safe-area-inset-bottom)_+_5rem)] text-ink">
-      <div className="w-full max-w-5xl">
-        {/* ---------------------------------------------------------- chassis */}
-        <section className="chassis-panel relative p-4 sm:p-6">
-          <ChassisScrew size="md" angle={18} className="absolute left-2 top-2" />
-          <ChassisScrew size="md" angle={-40} className="absolute right-2 top-2" />
-          <ChassisScrew size="md" angle={72} className="absolute bottom-2 left-2" />
-          <ChassisScrew size="md" angle={-8} className="absolute bottom-2 right-2" />
+    <>
+      <HardwareChassis
+        header={header}
+        statusRail={statusRail}
+        consoleBar={<div className="hidden md:block">{consoleTransport}</div>}
+        mobileNav={
+          <MobileNavPanel
+            activeTab={activeMobileTab}
+            onChangeTab={setActiveMobileTab}
+            isEditMode={isEditMode}
+            onToggleEditMode={handleToggleEditMode}
+          />
+        }
+        bottomBar={barTransport}
+      >
+        {/* --------------------------------------------------- mobile views */}
+        <div className="flex flex-col gap-3 md:hidden">
+          <div
+            id="panel-sequencer"
+            role="tabpanel"
+            aria-labelledby="tab-sequencer"
+            hidden={activeMobileTab !== 'sequencer'}
+          >
+            <SequencerMatrix variant="mobile" />
+          </div>
 
-          <header className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-chassis-border pb-4">
-            <div>
-              <h1 className="font-hardware text-lg font-bold tracking-[0.2em] text-ink">
-                W-AUDIO // MODEL-16
-              </h1>
-              <p className="engraved-label font-hardware text-[10px]">
-                Phase 2 · primitive bench
-              </p>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <LedIndicator
-                  color={isPowered ? 'emerald' : 'amber'}
-                  isOn={isPowered}
-                  size="md"
-                  label={isPowered ? 'Power on' : 'Standby'}
-                />
-                <span className="engraved-label font-hardware text-[10px]">
-                  {isPowered ? 'online' : 'standby'}
-                </span>
-              </div>
-              <MechanicalSwitch
-                isOn={isPowered}
-                onToggle={() => setIsPowered((previous) => !previous)}
-                label="Power"
-                variant="power"
-                size="md"
-                color="emerald"
-              />
-            </div>
-          </header>
-
-          {/* ------------------------------------------------------- readouts */}
-          <div className="mb-6 flex flex-wrap items-end gap-6">
-            <SevenSegmentDisplay label="Tempo" value={formatBpm(bpm)} digits={3} isActive={isPowered} size="lg" suffix="BPM" />
-            <SevenSegmentDisplay
-              label="Cutoff"
-              value={Math.round(cutoff)}
-              digits={5}
-              isActive={isPowered}
-              size="md"
-              suffix="Hz"
-            />
-            <SevenSegmentDisplay
-              label="Tracks live"
-              value={`${activeTrackCount}/8`}
-              digits={3}
-              isActive={isPowered}
-              size="md"
+          <div
+            id="panel-soundboard"
+            role="tabpanel"
+            aria-labelledby="tab-soundboard"
+            hidden={activeMobileTab !== 'soundboard'}
+          >
+            <SoundboardMatrix
+              onTriggerPad={handleTriggerPad}
+              flashPadId={keyboard.lastTriggeredPadId}
+              flashToken={keyboard.flashToken}
             />
           </div>
 
-          {/* ---------------------------------------------------------- knobs */}
-          <div className={`flex flex-wrap items-start justify-center gap-6 ${isPowered ? '' : 'opacity-60'}`}>
-            <KnobRotary
-              label="Tempo"
-              value={bpm}
-              min={MIN_BPM}
-              max={MAX_BPM}
-              step={1}
-              defaultValue={120}
-              size="lg"
-              onChange={setBpm}
-              accentColor="amber"
-              disabled={!isPowered}
+          <div
+            id="panel-fx"
+            role="tabpanel"
+            aria-labelledby="tab-fx"
+            hidden={activeMobileTab !== 'fx'}
+            className="flex flex-col gap-3"
+          >
+            {consoleTransport}
+            {masterSection}
+            {patternManager}
+          </div>
+        </div>
+
+        {/* -------------------------------------- tablet + desktop rack view */}
+        <div className="hidden flex-col gap-3 md:flex">
+          <SequencerMatrix variant="rack" />
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <SoundboardMatrix
+              onTriggerPad={handleTriggerPad}
+              flashPadId={keyboard.lastTriggeredPadId}
+              flashToken={keyboard.flashToken}
             />
-            <KnobRotary
-              label="Master"
-              value={masterVolume}
-              min={0}
-              max={1.2}
-              step={0.01}
-              defaultValue={0.85}
-              size="lg"
-              onChange={setMasterVolume}
-              accentColor="lime"
-              disabled={!isPowered}
-            />
-            <KnobRotary
-              label="Cutoff"
-              value={cutoff}
-              min={20}
-              max={20000}
-              scale="log"
-              defaultValue={18000}
-              size="lg"
-              onChange={setCutoff}
-              unit="Hz"
-              accentColor="cyan"
-              disabled={!isPowered}
-            />
-            <KnobRotary
-              label="Delay"
-              value={delayTime}
-              min={0.01}
-              max={1}
-              scale="log"
-              step={0.001}
-              defaultValue={0.25}
-              size="md"
-              onChange={setDelayTime}
-              unit="s"
-              accentColor="violet"
-              disabled={!isPowered}
-            />
+            {masterSection}
           </div>
 
-          {/* ----------------------------------------------------------- vu */}
-          <div className="mt-6 flex items-end justify-center gap-8">
-            <LedVuMeter level={meterLevel} segments={12} orientation="vertical" label="L" peakLevel={meterLevel} />
-            <LedVuMeter level={meterLevel} segments={12} orientation="vertical" label="R" peakLevel={meterLevel} />
-            <LedVuMeter
-              level={meterLevel}
-              segments={16}
-              orientation="horizontal"
-              label="Master bus"
-              showScale
-            />
-          </div>
-        </section>
+          {patternManager}
+        </div>
 
-        {/* ---------------------------------------------------- button + LED row */}
-        <section className="chassis-panel mt-4 p-4 sm:p-6">
-          <h2 className="engraved-label mb-3 font-hardware text-[10px]">Latching controls</h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <PushButton
-              label="Edit mode"
-              onClick={() => setIsEditMode((previous) => !previous)}
-              isActive={isEditMode}
-              variant="primary"
-              size="md"
-            />
-            <PushButton label="Play" onClick={() => setIsPowered(true)} variant="primary" size="md" color="emerald" />
-            <PushButton label="Stop" onClick={() => setIsPowered(false)} variant="secondary" size="md" />
-            <PushButton label="Panic" onClick={() => setSoloIndex(null)} variant="danger" size="md" />
-            <PushButton label="Ghost" onClick={() => undefined} variant="ghost" size="md" />
-            <PushButton label="Disabled" onClick={() => undefined} disabled size="sm" />
-          </div>
+        <footer className="flex flex-wrap items-center justify-between gap-2 pb-2 font-hardware text-[9px] text-ink-faint">
+          <span>
+            {stepCount} steps · swing {formatPercent(swing)} · master{' '}
+            {formatPercent(masterFx.masterVolume / 1.2)}
+          </span>
+          <span className="flex items-center gap-1">
+            <ChassisScrew size="sm" angle={20} />
+            <ChassisScrew size="sm" angle={-30} />
+            {hasHydrated ? 'memory ready' : 'loading memory…'}
+          </span>
+        </footer>
+      </HardwareChassis>
 
-          <h2 className="engraved-label mb-3 mt-6 font-hardware text-[10px]">
-            Palette · every TrackColor through COLOR_MAP
-          </h2>
-          <div className="flex flex-wrap items-center gap-3">
-            {TRACK_COLOR_ORDER.map((color: TrackColor) => (
-              <span key={color} className="flex items-center gap-1.5">
-                <LedIndicator color={color} isOn size="sm" label={`${color} lit`} />
-                <LedIndicator color={color} isOn={false} size="sm" label={`${color} unlit`} />
-                <span className="font-hardware text-[9px] text-ink-faint">{color}</span>
-              </span>
-            ))}
-          </div>
-
-          <h2 className="engraved-label mb-3 mt-6 font-hardware text-[10px]">
-            Track mute / solo latching
-          </h2>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {TRACK_LABELS.map((name, index) => (
-              <div key={name} className="chassis-sunken flex items-center gap-2 p-2">
-                <LedIndicator
-                  color={TRACK_TEMPLATES[index].color}
-                  isOn={!muteStates[index]}
-                  size="xs"
-                  label={`${name} active`}
-                />
-                <span className="flex-1 truncate font-hardware text-[10px] text-ink-muted">{name}</span>
-                <PushButton
-                  label="M"
-                  ariaLabel={`Mute ${name}`}
-                  onClick={() => toggleMute(index)}
-                  isActive={muteStates[index]}
-                  color="crimson"
-                  variant="ghost"
-                  size="sm"
-                  className="min-h-[32px]! px-2!"
-                />
-                <PushButton
-                  label="S"
-                  ariaLabel={`Solo ${name}`}
-                  onClick={() => toggleSolo(index)}
-                  isActive={soloIndex === index}
-                  color="amber"
-                  variant="ghost"
-                  size="sm"
-                  className="min-h-[32px]! px-2!"
-                />
-              </div>
-            ))}
-          </div>
-
-          <p className="mt-6 border-t border-chassis-border pt-3 font-hardware text-[10px] leading-relaxed text-ink-dim">
-            Drag a knob vertically to change it · hold SHIFT for fine control · double-click to
-            restore the factory value · arrow keys, PageUp/PageDown, Home and End are supported.
-            Phase 4 replaces the bench meters with real analyser data.
-          </p>
-        </section>
-      </div>
-    </main>
+      <PowerOnOverlay
+        isInitialized={isInitialized}
+        onPowerOn={initializeAudio}
+        patternName={patternName}
+        bpm={bpm}
+      />
+    </>
   );
 }

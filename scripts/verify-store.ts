@@ -22,7 +22,6 @@ import { STORAGE_KEYS } from '../src/lib/constants/storageKeys';
 import {
   clearWorkingCopy,
   exportPatternToJson,
-  getSlotMetadataList,
   safeStorage,
 } from '../src/lib/storage/patternStorage';
 import {

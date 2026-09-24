@@ -39,6 +39,14 @@ import { StepEditorSheet } from '../src/components/molecules/StepEditorSheet';
 import { TrackHeader } from '../src/components/molecules/TrackHeader';
 import { TransportControls } from '../src/components/molecules/TransportControls';
 
+import { HardwareChassis } from '../src/components/organisms/HardwareChassis';
+import { MobileNavPanel } from '../src/components/organisms/MobileNavPanel';
+import { PowerOnOverlay } from '../src/components/organisms/PowerOnOverlay';
+import { SequencerMatrix } from '../src/components/organisms/SequencerMatrix';
+import { SoundboardMatrix } from '../src/components/organisms/SoundboardMatrix';
+import { StereoVuMeter } from '../src/components/molecules/StereoVuMeter';
+import HomePage from '../src/app/page';
+
 import { useAudioEngine } from '../src/hooks/useAudioEngine';
 import { useLocalPersistence } from '../src/hooks/useLocalPersistence';
 import { usePlayheadTracker } from '../src/hooks/usePlayheadTracker';
@@ -66,6 +74,14 @@ function check(label: string, condition: boolean, detail?: string): void {
     : `${currentSection} :: ${label}`;
   failures.push(message);
   console.log(`  \u2717 ${label}${detail ? ` -> ${detail}` : ''}`);
+}
+
+function equal<T>(label: string, actual: T, expected: T): void {
+  check(
+    label,
+    Object.is(actual, expected),
+    `expected ${String(expected)}, received ${String(actual)}`,
+  );
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -118,6 +134,18 @@ const pad = SOUNDBOARD_PRESET_TEMPLATES[0];
 const masterFx = createDefaultMasterFx();
 const inactiveStep: Step = { index: 0, active: false, velocity: 0.8, probability: 1, pitchOffset: 0 };
 const activeStep: Step = { index: 5, active: true, velocity: 0.6, probability: 0.5, pitchOffset: -3 };
+
+/** Track names in factory order, reused by the rack grid assertions. */
+const TRACK_LABELS_FOR_TEST: readonly string[] = [
+  'KICK',
+  'SNARE',
+  'HAT CLOSED',
+  'HAT OPEN',
+  'CLAP',
+  'TOM LOW',
+  'TOM HIGH',
+  'LEAD SYNTH',
+];
 
 const slotMetadata: StorageSlotMetadata[] = Array.from({ length: 8 }, (_unused, index) => {
   const slot = index + 1;
@@ -567,15 +595,142 @@ check('audio reports uninitialised during SSR', harnessHtml.includes('<dd>false<
 check('transport reports idle during SSR', harnessHtml.includes('<dd>0</dd>'));
 check('the meter reads silence during SSR', harnessHtml.includes('<dd>0</dd>'));
 
+/* -------------------------------------------------------------- 6. organisms */
+
+section('HardwareChassis');
+const chassisHtml = render(
+  'HardwareChassis',
+  createElement(HardwareChassis, {
+    header: createElement('h1', null, 'CHASSIS HEADER'),
+    statusRail: createElement('p', null, 'STATUS RAIL'),
+    consoleBar: createElement('div', null, 'CONSOLE BAR'),
+    mobileNav: createElement('div', null, 'MOBILE NAV'),
+    bottomBar: createElement('div', null, 'BOTTOM BAR'),
+    children: createElement('div', null, 'CHASSIS CONTENT'),
+  }),
+);
+check('chassis renders its slots', ['CHASSIS HEADER', 'STATUS RAIL', 'CONSOLE BAR', 'MOBILE NAV', 'BOTTOM BAR', 'CHASSIS CONTENT'].every((token) => chassisHtml.includes(token)));
+check('rack ears are hidden below lg', chassisHtml.includes('hidden w-9 border-r lg:block'));
+check('corner screws are hidden below md', chassisHtml.includes('absolute inset-0 hidden md:block'));
+check('bottom bar is mobile-only', chassisHtml.includes('fixed inset-x-0 bottom-0 z-40 md:hidden'));
+check(
+  'root reserves the safe-area bottom padding',
+  chassisHtml.includes('pb-[calc(env(safe-area-inset-bottom)_+_5rem)]'),
+);
+// Eight ear screws plus the four corner screws in the header panel.
+equal('each ear carries four screws', countOccurrences(chassisHtml, 'left-1/2 -translate-x-1/2 top-['), 8);
+equal('the header carries four corner screws', countOccurrences(chassisHtml, 'hex-screw relative'), 12);
+
+section('MobileNavPanel');
+const navHtml = render(
+  'MobileNavPanel',
+  createElement(MobileNavPanel, {
+    activeTab: 'soundboard',
+    onChangeTab: () => undefined,
+    isEditMode: true,
+    onToggleEditMode: () => undefined,
+  }),
+);
+check('nav exposes a tablist', navHtml.includes('role="tablist"'));
+equal('nav renders three tabs', countOccurrences(navHtml, 'role="tab"'), 3);
+check('nav marks the active tab', navHtml.includes('aria-selected="true"'));
+check('nav links tabs to their panels', navHtml.includes('aria-controls="panel-soundboard"'));
+check('nav is hidden from md up', navHtml.includes('md:hidden'));
+check('nav carries the edit latch', navHtml.includes('aria-label="Edit"'));
+check('nav explains edit mode', navHtml.includes('tap a step to edit velocity'));
+
+section('PowerOnOverlay');
+const hiddenOverlay = render(
+  'PowerOnOverlay (initialised)',
+  createElement(PowerOnOverlay, { isInitialized: true, onPowerOn: () => Promise.resolve() }),
+);
+check('overlay disappears once audio exists', hiddenOverlay === '');
+
+const overlayHtml = render(
+  'PowerOnOverlay (suspended)',
+  createElement(PowerOnOverlay, {
+    isInitialized: false,
+    onPowerOn: () => Promise.resolve(),
+    patternName: 'FACTORY PATTERN 1',
+    bpm: 120,
+  }),
+);
+check('overlay is a modal dialog', overlayHtml.includes('role="dialog"') && overlayHtml.includes('aria-modal="true"'));
+check('overlay shows the instrument name', overlayHtml.includes('MODEL-16'));
+check('overlay offers a power switch', overlayHtml.includes('role="switch"'));
+check('overlay explains the gesture requirement', overlayHtml.includes('Tap to power on'));
+check('overlay names the loaded pattern', overlayHtml.includes('FACTORY PATTERN 1'));
+
+section('SequencerMatrix (mobile)');
+const mobileMatrixHtml = render(
+  'SequencerMatrix (mobile)',
+  createElement(SequencerMatrix, { variant: 'mobile' }),
+);
+equal('mobile grid is 4 columns', countOccurrences(mobileMatrixHtml, 'grid-cols-4'), 1);
+equal('mobile grid renders 16 steps', countOccurrences(mobileMatrixHtml, 'data-step-index'), 16);
+equal('mobile renders a track selector tab per track', countOccurrences(mobileMatrixHtml, 'role="tab"'), 8);
+check('mobile steps use the 44px touch size', mobileMatrixHtml.includes('h-12 w-12'));
+check('mobile renders the selected track header', mobileMatrixHtml.includes('aria-label="Mute KICK"'));
+check('mobile marks the step edit affordance', mobileMatrixHtml.includes('edit mode') || mobileMatrixHtml.includes('trigger mode'));
+
+section('SequencerMatrix (rack)');
+const rackMatrixHtml = render(
+  'SequencerMatrix (rack)',
+  createElement(SequencerMatrix, { variant: 'rack' }),
+);
+equal('rack renders eight tracks of sixteen steps', countOccurrences(rackMatrixHtml, 'data-step-index'), 128);
+check('rack pins track headers while scrolling', rackMatrixHtml.includes('sticky left-0 z-20'));
+check('rack scrolls horizontally', rackMatrixHtml.includes('overflow-x-auto'));
+check('rack renders a step ruler', rackMatrixHtml.includes('>16</span>'));
+check('rack renders every track name', TRACK_LABELS_FOR_TEST.every((name) => rackMatrixHtml.includes(name)));
+
+section('SoundboardMatrix');
+const boardHtml = render(
+  'SoundboardMatrix',
+  createElement(SoundboardMatrix, { onTriggerPad: () => undefined }),
+);
+equal('soundboard renders sixteen pads', countOccurrences(boardHtml, 'data-pad-id'), 16);
+check('soundboard keeps four fluid columns', boardHtml.includes('grid-cols-4'));
+check('soundboard guarantees a 72px target', countOccurrences(boardHtml, 'min-h-[72px]') === 16);
+check('soundboard documents the key bindings', boardHtml.includes('keys 1234'));
+
+section('StereoVuMeter');
+const meterComponentHtml = render(
+  'StereoVuMeter',
+  createElement(StereoVuMeter, { isInitialized: false, segments: 12 }),
+);
+check('meter renders left and right ladders', meterComponentHtml.includes('L: 0 percent') && meterComponentHtml.includes('R: 0 percent'));
+equal('meter renders every rung on both channels', countOccurrences(meterComponentHtml, 'rounded-[1px]'), 24);
+
+section('Root screen integration');
+const pageHtml = render('HomePage', createElement(HomePage));
+check('page renders the branding', pageHtml.includes('W-AUDIO // MODEL-16'));
+check('page renders the sequencer', pageHtml.includes('SEQUENCER'));
+check('page renders the soundboard', pageHtml.includes('SOUNDBOARD'));
+check('page renders the master FX bay', pageHtml.includes('MASTER FX'));
+check('page renders pattern memory', pageHtml.includes('PATTERN MEMORY'));
+check('page renders the mobile view switcher', pageHtml.includes('Mobile view switcher'));
+check('page renders the top console', pageHtml.includes('sticky top-0 z-30'));
+check('page renders the fixed mobile transport bar', pageHtml.includes('fixed inset-x-0 bottom-0 z-40 md:hidden'));
+check('page gates the instrument behind the power overlay', pageHtml.includes('Power on the instrument'));
+check('page renders three mobile panels', countOccurrences(pageHtml, 'role="tabpanel"') === 3);
+check('page renders the rack matrix for tablet and desktop', pageHtml.includes('hidden flex-col gap-3 md:flex'));
+check('page renders the mobile matrix', pageHtml.includes('flex flex-col gap-3 md:hidden'));
+check('page announces the suspended audio state', pageHtml.includes('Audio is suspended'));
+check(
+  'page reserves the safe-area padding',
+  pageHtml.includes('pb-[calc(env(safe-area-inset-bottom)_+_5rem)]'),
+);
+
 /* ----------------------------------------------------------------- summary */
 
 const total = passed + failures.length;
 console.log(`\n${'='.repeat(60)}`);
 if (failures.length === 0) {
-  console.log(`PHASE 3 RENDER GATE PASSED \u2014 ${passed}/${total} checks green.`);
+  console.log(`RENDER GATE (PHASES 3 + 5) PASSED \u2014 ${passed}/${total} checks green.`);
   process.exit(0);
 }
-console.log(`PHASE 3 RENDER GATE FAILED \u2014 ${failures.length}/${total} checks failed:`);
+console.log(`RENDER GATE (PHASES 3 + 5) FAILED \u2014 ${failures.length}/${total} checks failed:`);
 for (const failure of failures) {
   console.log(`  \u2717 ${failure}`);
 }

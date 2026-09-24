@@ -74,7 +74,7 @@ export function TransportControls({
         isActive={isPlaying}
         color="emerald"
         variant="primary"
-        size={isBar ? 'md' : 'md'}
+        size="md"
         disabled={!isPowered}
         ariaLabel={isPlaying ? 'Pause transport' : 'Start transport'}
       />
@@ -82,7 +82,7 @@ export function TransportControls({
         label="Stop"
         onClick={onStop}
         variant="secondary"
-        size={isBar ? 'md' : 'md'}
+        size="md"
         disabled={!isPowered}
         ariaLabel="Stop transport"
       />
@@ -137,7 +137,7 @@ export function TransportControls({
         label="Tap"
         onClick={onTapTempo}
         variant="primary"
-        size={isBar ? 'md' : 'md'}
+        size="md"
         disabled={!isPowered}
         ariaLabel="Tap tempo"
         title="Tap four times in time with the beat"

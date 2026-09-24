@@ -628,6 +628,7 @@ const emissionsBeforeReplay = transportEmissions;
 await graphEngine.play(() => schedulerPattern);
 equal('play() while playing is a no-op', transportEmissions, emissionsBeforeReplay);
 
+
 // Resync guard: jump the clock far ahead and confirm no burst of late steps.
 ctx.currentTime = 12;
 await sleep(80);
@@ -637,6 +638,11 @@ check(
   'resynced steps are never in the past',
   pending.playheadQueue.every((item) => item.time >= 12),
 );
+
+unsubscribeTransport();
+const emissionsAfterUnsubscribe = transportEmissions;
+graphEngine.stop();
+equal('unsubscribing stops notifications', transportEmissions, emissionsAfterUnsubscribe);
 
 section('Mute and solo at schedule time');
 const soloPattern = createDefaultPattern(1);
