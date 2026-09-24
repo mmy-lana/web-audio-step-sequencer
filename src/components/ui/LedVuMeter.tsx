@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactElement } from 'react';
-import { clamp01 } from '@/lib/utils/audioMath';
+import { clamp01, normalizeVuSegments } from '@/lib/utils/audioMath';
 
 export type VuMeterOrientation = 'vertical' | 'horizontal';
 
@@ -63,7 +63,7 @@ export function LedVuMeter({
   showScale = false,
   className = '',
 }: LedVuMeterProps): ReactElement {
-  const safeSegments = Math.max(2, Math.min(32, Math.trunc(segments)));
+  const safeSegments = normalizeVuSegments(segments);
   const clampedLevel = clamp01(level);
   const litCount = Math.round(clampedLevel * safeSegments);
   const peakIndex =

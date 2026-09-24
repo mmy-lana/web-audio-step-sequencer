@@ -22,6 +22,12 @@ import {
   createDefaultTrack,
 } from '../src/lib/constants/defaultPatterns';
 import { SOUNDBOARD_PRESET_TEMPLATES } from '../src/lib/constants/soundboardPresets';
+import {
+  MAX_VU_SEGMENTS,
+  MIN_VU_SEGMENTS,
+  normalizeVuSegments,
+  quantizeVuLevel,
+} from '../src/lib/utils/audioMath';
 import type { Step } from '../src/types/audio';
 import type { StorageSlotMetadata } from '../src/types/storage';
 
@@ -765,6 +771,127 @@ const meterComponentHtml = render(
 );
 check('meter renders left and right ladders', meterComponentHtml.includes('L: 0 percent') && meterComponentHtml.includes('R: 0 percent'));
 equal('meter renders every rung on both channels', countOccurrences(meterComponentHtml, 'rounded-[1px]'), 24);
+
+/* ------------------------------------------------ 6b. meter quantization */
+
+section('VU meter quantization');
+/** Lit rung tones emitted by `LedVuMeter`, counted straight from the markup. */
+const LIT_TONE_CLASSES: readonly string[] = ['bg-[#00ff66]', 'bg-[#ffb703]', 'bg-[#ff0055]'];
+
+function litRungs(html: string): number {
+  return LIT_TONE_CLASSES.reduce((total, tone) => total + countOccurrences(html, tone), 0);
+}
+
+const LADDER_SEGMENTS = 12;
+const rawBelowRung = render(
+  'LedVuMeter (0.42 raw)',
+  createElement(LedVuMeter, { level: 0.42, segments: LADDER_SEGMENTS, label: 'L' }),
+);
+const rawInsideRung = render(
+  'LedVuMeter (0.44 raw)',
+  createElement(LedVuMeter, { level: 0.44, segments: LADDER_SEGMENTS, label: 'L' }),
+);
+const quantizedBelowRung = render(
+  'LedVuMeter (quantized 0.42)',
+  createElement(LedVuMeter, {
+    level: quantizeVuLevel(0.42, LADDER_SEGMENTS),
+    segments: LADDER_SEGMENTS,
+    label: 'L',
+  }),
+);
+const quantizedInsideRung = render(
+  'LedVuMeter (quantized 0.44)',
+  createElement(LedVuMeter, {
+    level: quantizeVuLevel(0.44, LADDER_SEGMENTS),
+    segments: LADDER_SEGMENTS,
+    label: 'L',
+  }),
+);
+const quantizedNextRung = render(
+  'LedVuMeter (quantized 0.5)',
+  createElement(LedVuMeter, {
+    level: quantizeVuLevel(0.5, LADDER_SEGMENTS),
+    segments: LADDER_SEGMENTS,
+    label: 'L',
+  }),
+);
+
+equal(
+  'two raw readings inside one rung light the same ladder',
+  litRungs(rawBelowRung),
+  litRungs(rawInsideRung),
+);
+check(
+  'two raw readings inside one rung quantize to the same level',
+  quantizeVuLevel(0.42, LADDER_SEGMENTS) === quantizeVuLevel(0.44, LADDER_SEGMENTS),
+);
+check(
+  'quantized readings inside one rung render byte-identical output',
+  quantizedBelowRung === quantizedInsideRung,
+);
+check('crossing a rung boundary changes the rendered ladder', quantizedBelowRung !== quantizedNextRung);
+equal(
+  'quantizing preserves the ladder lit by the raw reading',
+  litRungs(quantizedBelowRung),
+  litRungs(rawBelowRung),
+);
+equal('crossing the boundary lights exactly one more rung', litRungs(quantizedNextRung), litRungs(quantizedBelowRung) + 1);
+check('the quantized ladder still announces its level', quantizedBelowRung.includes('L: 42 percent'));
+check('the crossed ladder announces the new level', quantizedNextRung.includes('L: 50 percent'));
+
+equal('silence stays at zero', quantizeVuLevel(0, LADDER_SEGMENTS), 0);
+equal('a negative reading clamps to zero', quantizeVuLevel(-0.4, LADDER_SEGMENTS), 0);
+equal('full scale stays at one', quantizeVuLevel(1, LADDER_SEGMENTS), 1);
+equal('an over-range reading clamps to one', quantizeVuLevel(2.5, LADDER_SEGMENTS), 1);
+equal('a non-finite reading falls back to silence', quantizeVuLevel(Number.NaN, LADDER_SEGMENTS), 0);
+
+const sampledLevels = [0, 0.02, 0.37, 0.5, 0.83, 0.999, 1];
+check(
+  'every quantized level stays inside the meter range',
+  sampledLevels.every((level) => {
+    const quantized = quantizeVuLevel(level, LADDER_SEGMENTS);
+    return quantized >= 0 && quantized <= 1;
+  }),
+);
+check(
+  'every quantized level lands exactly on a rung',
+  sampledLevels.every((level) =>
+    Number.isInteger(Math.round(quantizeVuLevel(level, LADDER_SEGMENTS) * LADDER_SEGMENTS)),
+  ),
+);
+check(
+  'the segment count is honoured',
+  quantizeVuLevel(0.31, 8) === 2 / 8 && quantizeVuLevel(0.31, 12) === 4 / 12,
+);
+check(
+  'the segment count is clamped exactly like the ladder',
+  normalizeVuSegments(1) === MIN_VU_SEGMENTS &&
+    normalizeVuSegments(64) === MAX_VU_SEGMENTS &&
+    normalizeVuSegments(12.7) === 12,
+);
+
+// The component compares one quantized level per channel, so a same-rung move on
+// either side must not produce a new pair.
+const pairBefore = {
+  left: quantizeVuLevel(0.42, LADDER_SEGMENTS),
+  right: quantizeVuLevel(0.44, LADDER_SEGMENTS),
+};
+const pairSameRung = {
+  left: quantizeVuLevel(0.44, LADDER_SEGMENTS),
+  right: quantizeVuLevel(0.42, LADDER_SEGMENTS),
+};
+const pairLeftCrossed = {
+  left: quantizeVuLevel(0.42, LADDER_SEGMENTS),
+  right: quantizeVuLevel(0.9, LADDER_SEGMENTS),
+};
+check(
+  'same-rung float noise never changes the meter pair',
+  pairBefore.left === pairSameRung.left && pairBefore.right === pairSameRung.right,
+);
+check(
+  'the right channel quantizes independently of the left',
+  pairLeftCrossed.left === pairBefore.left && pairLeftCrossed.right !== pairBefore.right,
+);
 
 section('Root screen integration');
 const pageHtml = render('HomePage', createElement(HomePage));

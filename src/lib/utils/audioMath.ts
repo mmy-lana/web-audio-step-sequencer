@@ -35,6 +35,31 @@ export function clampBipolar(value: number): number {
   return clamp(value, -1, 1);
 }
 
+/** Ladder resolution bounds, mirrored by the LED VU meter primitive. */
+export const MIN_VU_SEGMENTS = 2;
+export const MAX_VU_SEGMENTS = 32;
+
+/**
+ * Normalizes a requested rung count exactly like the LED ladder does, so level
+ * quantization and rendering can never disagree about the ladder resolution.
+ */
+export function normalizeVuSegments(segments: number): number {
+  return Math.max(MIN_VU_SEGMENTS, Math.min(MAX_VU_SEGMENTS, Math.trunc(segments)));
+}
+
+/**
+ * Snaps a normalized meter level onto the ladder's visible resolution.
+ *
+ * A segmented meter can only display `segments` distinct states, so two analyser
+ * reads that land on the same rung render identical output. Quantizing here lets
+ * consumers compare quantized levels and skip the re-render that raw float noise
+ * would otherwise trigger on every animation frame.
+ */
+export function quantizeVuLevel(level: number, segments: number): number {
+  const rungs = normalizeVuSegments(segments);
+  return Math.round(clamp01(level) * rungs) / rungs;
+}
+
 /** Linear interpolation. `t` is not clamped. */
 export function lerp(start: number, end: number, t: number): number {
   return start + (end - start) * t;

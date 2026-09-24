@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { getAudioEngine } from '@/lib/audio/AudioEngine';
+import { normalizeVuSegments, quantizeVuLevel } from '@/lib/utils/audioMath';
 import { LedVuMeter } from '@/components/ui/LedVuMeter';
 
 export interface StereoVuMeterProps {
@@ -26,6 +27,11 @@ const DEFAULT_INTERVAL_MS = 60;
  * background, and frames are additionally throttled to `intervalMs` and dropped
  * when both channels are unchanged. Isolated in its own component so analyser
  * reads re-render only these two ladders, never the instrument shell.
+ *
+ * Readings are quantized to the ladder resolution first: the analyser returns
+ * slightly different floats on every frame, but a rung only lights once, so
+ * comparing raw values would re-render the ladders far more often than anything
+ * on screen actually changes.
  */
 export function StereoVuMeter({
   isInitialized,
@@ -44,6 +50,7 @@ export function StereoVuMeter({
 
     const engine = getAudioEngine();
     const sampleIntervalMs = Math.max(16, intervalMs);
+    const rungs = normalizeVuSegments(segments);
     let frameId = 0;
     let lastSampleAt = 0;
 
@@ -52,9 +59,12 @@ export function StereoVuMeter({
       if (isVisible && timestamp - lastSampleAt >= sampleIntervalMs) {
         lastSampleAt = timestamp;
         const next = engine.getStereoLevels();
-        // Dirty check: skip the render when the ladder would not change.
+        // Each channel is quantized independently against the ladder resolution.
+        const left = quantizeVuLevel(next.left, rungs);
+        const right = quantizeVuLevel(next.right, rungs);
+        // Dirty check: skip the render when the ladders would not change.
         setLevels((previous) =>
-          previous.left === next.left && previous.right === next.right ? previous : next,
+          previous.left === left && previous.right === right ? previous : { left, right },
         );
       }
       frameId = requestAnimationFrame(tick);
@@ -62,7 +72,7 @@ export function StereoVuMeter({
 
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [isInitialized, intervalMs]);
+  }, [isInitialized, intervalMs, segments]);
 
   return (
     <div className={`flex items-end justify-center gap-2 ${className}`}>

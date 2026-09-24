@@ -9,7 +9,7 @@
  * hydration, the autosave subscription, the playhead tracker, the analyser meter
  * loop, and the full audio-unlock click path.
  */
-import { act, createElement } from 'react';
+import { act, createElement, Profiler } from 'react';
 import type { ReactElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
@@ -18,6 +18,7 @@ import HomePage from '../src/app/page';
 import { useSequencerStore } from '../src/store/useSequencerStore';
 import { createDefaultPattern } from '../src/lib/constants/defaultPatterns';
 import { getAudioEngine } from '../src/lib/audio/AudioEngine';
+import { StereoVuMeter } from '../src/components/molecules/StereoVuMeter';
 import { FakeAudioContext, installFakeAudioContext } from './fakeWebAudio';
 
 /* ------------------------------------------------------------------ harness */
@@ -669,6 +670,131 @@ async function main(): Promise<void> {
     savedState.slotMetadata.find((entry) => entry.slot === 7)?.isEmpty === false,
   );
   check('the empty-slot flow emits no console noise', emptySaveMessages.length === 0, emptySaveMessages.slice(0, 2).join(' | '));
+
+  /* ------------------------------------------------ meter update suppression */
+  section('Meter update suppression');
+  // An isolated document with a hand-driven animation-frame queue, so the number
+  // of analyser reads and the number of commits are both exact.
+  const meterDom = new JSDOM('<!doctype html><html><body></body></html>', {
+    pretendToBeVisual: true,
+    url: 'http://localhost:3000/',
+  });
+  installDom(meterDom);
+  Object.defineProperty(meterDom.window.document, 'visibilityState', {
+    value: 'visible',
+    configurable: true,
+  });
+
+  const frameQueue: FrameRequestCallback[] = [];
+  let frameToken = 0;
+  installGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
+    frameToken += 1;
+    frameQueue.push(callback);
+    return frameToken;
+  });
+  installGlobal('cancelAnimationFrame', (): void => undefined);
+
+  const meterEngine = getAudioEngine();
+  // Readings inside a single 12-segment rung, apart from the deliberate crossing.
+  let noisyReadings: readonly number[] = [0.42, 0.4301, 0.4377, 0.4402, 0.4288];
+  let readingIndex = 0;
+  let analyserReads = 0;
+  meterEngine.getStereoLevels = () => {
+    const left = noisyReadings[readingIndex % noisyReadings.length];
+    const right = noisyReadings[(readingIndex + 2) % noisyReadings.length];
+    readingIndex += 1;
+    analyserReads += 1;
+    return { left, right };
+  };
+  const restoreStereoLevels = (): void => {
+    delete (meterEngine as unknown as { getStereoLevels?: unknown }).getStereoLevels;
+  };
+
+  let commits = 0;
+  const meterContainer = meterDom.window.document.createElement('div');
+  meterDom.window.document.body.appendChild(meterContainer);
+  const { createRoot } = await import('react-dom/client');
+  const meterRoot = createRoot(meterContainer);
+  await act(async () => {
+    meterRoot.render(
+      createElement(
+        Profiler,
+        {
+          id: 'stereo-meter',
+          onRender: () => {
+            commits += 1;
+          },
+        },
+        createElement(StereoVuMeter, { isInitialized: true, intervalMs: 16 }),
+      ),
+    );
+  });
+  check('the isolated meter commits its first frame', commits > 0, `${commits} commits`);
+
+  // A single monotonic clock, so every pumped frame is past `intervalMs`.
+  let frameTime = 1000;
+  const pumpFrames = async (frames: number): Promise<void> => {
+    for (let frame = 0; frame < frames; frame += 1) {
+      const pending = frameQueue.splice(0, frameQueue.length);
+      if (pending.length === 0) return;
+      frameTime += 40;
+      await act(async () => {
+        pending.forEach((callback) => {
+          callback(frameTime);
+        });
+      });
+    }
+  };
+
+  const readsBeforeNoise = analyserReads;
+  const commitsBeforeNoise = commits;
+  await pumpFrames(10);
+  const noiseReads = analyserReads - readsBeforeNoise;
+  const noiseCommits = commits - commitsBeforeNoise;
+
+  check(
+    'the running meter samples the analyser',
+    noiseReads >= 8,
+    `${noiseReads} reads`,
+  );
+  // React may commit one extra render after a state change before its eager
+  // bailout takes over. The regression signal is that commits stop tracking the
+  // frame count: without quantization every frame would commit.
+  check(
+    'identical visible rungs stop the meter from re-rendering every frame',
+    noiseCommits <= 2,
+    `${noiseReads} reads -> ${noiseCommits} commits`,
+  );
+  check(
+    'the visible level holds one rung for the whole noise burst',
+    meterContainer.textContent?.includes('left 42 percent') === true &&
+      meterContainer.textContent?.includes('right 42 percent') === true,
+    meterContainer.textContent ?? '',
+  );
+
+  // Positive control: crossing a rung must commit, which also proves the commit
+  // counter is live rather than silently disabled.
+  noisyReadings = [0.92, 0.95];
+  const commitsBeforeCrossing = commits;
+  await pumpFrames(3);
+  check(
+    'crossing a rung re-renders the meter',
+    commits > commitsBeforeCrossing,
+    `${commits} commits`,
+  );
+  check(
+    'the crossed reading lights the louder rungs',
+    meterContainer.textContent?.includes('left 92 percent') === true &&
+      meterContainer.textContent?.includes('right 92 percent') === true,
+    meterContainer.textContent ?? '',
+  );
+
+  restoreStereoLevels();
+  installGlobal('requestAnimationFrame', meterDom.window.requestAnimationFrame);
+  installGlobal('cancelAnimationFrame', meterDom.window.cancelAnimationFrame);
+  await act(async () => {
+    meterRoot.unmount();
+  });
 
   section('Shared element descriptor probe');
   // Settles whether reusing one element object at two tree positions is itself
