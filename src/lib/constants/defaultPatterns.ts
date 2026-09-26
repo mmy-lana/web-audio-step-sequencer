@@ -350,21 +350,48 @@ export function createDefaultTrack(trackIndex: number, stepCount: StepCount): Tr
   };
 }
 
+/** Per-slot musical identity seeded into every factory pattern. */
+export interface SlotPreset {
+  readonly name: string;
+  readonly bpm: number;
+  readonly swing: number;
+}
+
+/**
+ * Each slot opens on a different genre feel rather than a flat factory default,
+ * so selecting an unwritten slot yields something playable straight away. The
+ * tempo and swing of a genre are the only variables here: the groove itself is
+ * shared, which keeps the eight slots cheap to load and byte-reproducible.
+ */
+export const SLOT_PRESETS = {
+  1: { name: 'ELECTRO 808', bpm: 120, swing: 0.0 },
+  2: { name: 'DEEP HOUSE', bpm: 124, swing: 0.16 },
+  3: { name: 'ACID TECHNO', bpm: 132, swing: 0.0 },
+  4: { name: 'BOOM BAP', bpm: 92, swing: 0.28 },
+  5: { name: 'SYNTHWAVE', bpm: 110, swing: 0.0 },
+  6: { name: 'DRUM & BASS', bpm: 174, swing: 0.0 },
+  7: { name: 'DUB CHORD', bpm: 128, swing: 0.2 },
+  8: { name: 'TRAP GROOVE', bpm: 140, swing: 0.08 },
+} as const satisfies Record<number, SlotPreset>;
+
 /**
  * Deterministic factory pattern. `slot` is clamped into 1..8 and `stepCount`
- * defaults to a 16-step bar.
+ * defaults to a 16-step bar. Each slot seeds its own genre template.
  */
 export function createDefaultPattern(slot: number = 1, stepCount: StepCount = DEFAULT_STEP_COUNT): Pattern {
   const resolvedSlot = clampPatternSlot(slot);
   const resolvedStepCount: StepCount = stepCount === 32 ? 32 : 16;
+  const preset: SlotPreset =
+    SLOT_PRESETS[resolvedSlot as keyof typeof SLOT_PRESETS] ??
+    { name: `FACTORY PATTERN ${resolvedSlot}`, bpm: DEFAULT_BPM, swing: DEFAULT_SWING };
 
   return {
     schemaVersion: 1,
     slot: resolvedSlot,
     id: `pat-slot-${resolvedSlot}-${DETERMINISTIC_TIMESTAMP}`,
-    name: `FACTORY PATTERN ${resolvedSlot}`,
-    bpm: DEFAULT_BPM,
-    swing: DEFAULT_SWING,
+    name: preset.name,
+    bpm: preset.bpm,
+    swing: preset.swing,
     stepCount: resolvedStepCount,
     tracks: Array.from({ length: TRACK_COUNT }, (_unused, index) =>
       createDefaultTrack(index, resolvedStepCount),

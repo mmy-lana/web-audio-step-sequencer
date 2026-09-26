@@ -20,7 +20,10 @@ import {
 import {
   DETERMINISTIC_TIMESTAMP,
   MAX_BPM,
+  MAX_SWING,
   MIN_BPM,
+  MIN_SWING,
+  SLOT_PRESETS,
   TRACK_COUNT,
   createDefaultMasterFx,
   createDefaultPattern,
@@ -430,6 +433,38 @@ check('isValidPatternSlot accepts 8', isValidPatternSlot(8));
 check('isValidPatternSlot rejects 9', !isValidPatternSlot(9));
 check('isValidPatternSlot rejects 1.5', !isValidPatternSlot(1.5));
 equal('slot storage key composition', getSlotStorageKey(4), `${STORAGE_KEYS.PATTERN_SLOT_PREFIX}4`);
+
+section('Slot genre seeding');
+const seededSlots = Array.from({ length: PATTERN_SLOT_COUNT }, (_unused, index) => index + 1);
+const seededPatterns = seededSlots.map((slot) => createDefaultPattern(slot));
+check(
+  'every slot seeds a named genre',
+  seededPatterns.every((pattern) => pattern.name.length > 0 && !pattern.name.startsWith('FACTORY PATTERN')),
+);
+check(
+  'the eight slot names are all distinct',
+  new Set(seededPatterns.map((pattern) => pattern.name)).size === PATTERN_SLOT_COUNT,
+);
+check(
+  'every seeded tempo stays inside the transport bounds',
+  seededPatterns.every((pattern) => pattern.bpm >= MIN_BPM && pattern.bpm <= MAX_BPM),
+);
+check(
+  'every seeded swing stays inside the swing bounds',
+  seededPatterns.every((pattern) => pattern.swing >= MIN_SWING && pattern.swing <= MAX_SWING),
+);
+check(
+  'every seeded pattern satisfies the schema',
+  seededPatterns.every((pattern) => PatternSchema.safeParse(pattern).success),
+);
+check(
+  'seeding is deterministic across calls',
+  seededSlots.every((slot) => createDefaultPattern(slot).name === createDefaultPattern(slot).name),
+);
+check(
+  'a clamped slot takes the preset of the slot it clamps to',
+  createDefaultPattern(0).name === SLOT_PRESETS[1].name && createDefaultPattern(99).name === SLOT_PRESETS[8].name,
+);
 
 /* --------------------------------------------------------------- 3. palette */
 

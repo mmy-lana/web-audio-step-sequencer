@@ -624,7 +624,7 @@ export function importPatternFromJson(rawJson: string, fileSize?: number): Stora
 ### 4.2 Zustand Store Architecture & Invariants
 - **Autosave vs. Slots:** Active pattern changes write immediately to `workingCopy` (in-memory state) and debounce-persist to `STORAGE_KEYS.WORKING_COPY` at 300ms. A boolean `isDirty` flag tracks divergence from the saved slot. Flushes occur on `visibilitychange` and `pagehide`.
 - **Slot Metadata Caching:** `slotMetadata` is retained in store state and refreshed on mount and after explicit mutations, avoiding 8 Zod schema parses on every render.
-- **Save & Load Confirmation:** `saveSlotAction` returns `'saved' | 'needs_confirm' | 'error'`. `loadSlotAction` returns `'loaded' | 'dirty_conflict' | 'error'`, prompting discard confirmation when `isDirty === true`.
+- **Save & Load Confirmation:** `saveSlotAction` returns `'saved' | 'needs_confirm' | 'error'`. `loadSlotAction` returns `'loaded' | 'created' | 'dirty_conflict' | 'error'`. An `isDirty === true` working copy returns `'dirty_conflict'`, which the UI answers with a **non-blocking inline banner** (never a synchronous `window.confirm`, which would stall the audio thread). An untouched slot is not a storage fault: it seeds a fresh working copy, returns `'created'`, and leaves the slot itself empty until the user saves.
 - **Cross-Tab Notification:** Cross-tab `storage` events trigger a UI toast prompt ("Pattern modified in another tab. Reload?") instead of automatically applying changes, avoiding live knob fighting and sync loops.
 - **Integer Sanitation:** Continuous knob controllers for `bpm` and `pitchOffset` pass through `Math.round()` prior to setting state, preventing fractional numbers from rejecting against Zod schema invariants.
 
@@ -1333,7 +1333,7 @@ export interface SequencerStoreState {
   setStepPage: (page: 0 | 1) => void;
   setEditingStep: (step: { trackIndex: number; stepIndex: number } | null) => void;
   refreshSlotMetadata: () => void;
-  loadSlotAction: (slot: number, force?: boolean) => 'loaded' | 'dirty_conflict' | 'error';
+  loadSlotAction: (slot: number, force?: boolean) => 'loaded' | 'created' | 'dirty_conflict' | 'error';
   saveSlotAction: (slot: number, confirmOverwrite?: boolean) => 'saved' | 'needs_confirm' | 'error';
   clearSlotAction: (slot: number) => void;
   duplicateSlotAction: (toSlot: number) => boolean;
@@ -1372,6 +1372,10 @@ export class EffectsChain {
 
 // src/lib/constants/defaultPatterns.ts
 export function createDefaultPattern(slot?: number): Pattern;
+// SLOT_PRESETS seeds each of the eight slots with its own genre identity
+// (name + tempo + swing): Electro, Deep House, Acid Techno, Boom Bap,
+// Synthwave, Drum & Bass, Dub Chord and Trap. The groove is shared, so the
+// eight slots stay cheap to build and byte-reproducible.
 
 // src/lib/audio/AudioEngine.ts
 export class AudioEngine {

@@ -17,7 +17,7 @@ import {
   useSequencerStore,
 } from '../src/store/useSequencerStore';
 import type { SequencerStoreState } from '../src/store/useSequencerStore';
-import { createDefaultPattern, DEFAULT_STEP_COUNT, TRACK_COUNT } from '../src/lib/constants/defaultPatterns';
+import { createDefaultPattern, DEFAULT_STEP_COUNT, SLOT_PRESETS, TRACK_COUNT } from '../src/lib/constants/defaultPatterns';
 import { STORAGE_KEYS, getSlotStorageKey } from '../src/lib/constants/storageKeys';
 import {
   clearWorkingCopy,
@@ -414,7 +414,7 @@ equal('a saved slot still loads after the empty selection', state().loadSlotActi
 equal('the loaded slot keeps its tempo', state().pattern.bpm, 120);
 
 equal('re-selecting the new slot is offered again', state().loadSlotAction(7, true), 'created');
-equal('re-selecting restores the fresh default tempo', state().pattern.bpm, 120);
+equal('re-selecting restores the slot genre tempo', state().pattern.bpm, SLOT_PRESETS[7].bpm);
 state().setBpm(111);
 equal('saving the new pattern into the empty slot succeeds', state().saveSlotAction(7), 'saved');
 equal('saving clears the dirty flag', state().isDirty, false);
@@ -422,7 +422,7 @@ check(
   'the slot is now occupied',
   state().slotMetadata.find((entry) => entry.slot === 7)?.isEmpty === false,
 );
-equal('the populated slot reports its stored name', state().slotMetadata.find((entry) => entry.slot === 7)?.name, 'FACTORY PATTERN 7');
+equal('the populated slot reports its stored name', state().slotMetadata.find((entry) => entry.slot === 7)?.name, SLOT_PRESETS[7].name);
 equal('the saved slot reloads with the edit', state().loadSlotAction(7, true), 'loaded');
 equal('the reloaded slot keeps the edited tempo', state().pattern.bpm, 111);
 equal('re-saving the populated slot asks first', state().saveSlotAction(7), 'needs_confirm');
